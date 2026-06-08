@@ -1,0 +1,17 @@
+openapi: 3.0.3
+info:
+  title: Sea Battle API
+  version: 1.0.0
+
+# Подключаем пути из других файлов
+paths:
+  /auth/login:
+    $ref: './paths/auth.yaml#/login'
+  /games:
+    $ref: './paths/games.yaml#/list'
+
+# Подключаем компоненты (схемы данных)
+components:
+  schemas:
+    User:
+      $ref: './components/schemas/User.yaml'
