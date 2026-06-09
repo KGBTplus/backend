@@ -7,8 +7,8 @@ info:
 paths:
   /auth/login:
     $ref: './paths/auth.yaml#/login'
-  /games:
-    $ref: './paths/games.yaml#/list'
+#  /games:
+#    $ref: './paths/games.yaml#/list'
 
 # Подключаем компоненты (схемы данных)
 components:

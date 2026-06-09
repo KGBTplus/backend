@@ -1,0 +1,26 @@
+# Это «контейнер» для путей авторизации
+login:
+  post:
+    summary: Вход в систему
+    operationId: login
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [username, password]
+            properties:
+              username: { type: string }
+              password: { type: string }
+    responses:
+      '200':
+        description: Успешный вход
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user:
+                  $ref: '../components/schemas/User.yaml'
+                token: { type: string }
