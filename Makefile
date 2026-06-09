@@ -1,5 +1,5 @@
 generate:
-	# Сначала генерируем API (сервер)
+	# Генерирация API (сервер)
 	oapi-codegen -config internal/api/oapi-codegen.yaml api/openapi.yaml
-	# Затем генерируем код БД
+	# Генерирация кода БД
 	sqlc generate

@@ -1,0 +1,40 @@
+post:
+  operationId: register
+  summary: Регистрация нового пользователя
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            username:
+              type: string
+            password:
+              type: string
+          required:
+            - username
+            - password
+  responses:
+    '201':
+      description: Пользователь успешно создан
+    '400':
+      description: Ошибка валидации данных (возможно пустые поля)
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+    '409':
+      description: Пользователь уже существует
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+    '500':
+      description: Ошибка сервера
