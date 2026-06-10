@@ -7,7 +7,16 @@ paths:
     $ref: paths/auth_login.yaml
   /auth/register:
     $ref: paths/auth_register.yaml
+  /auth/2fa/setup:
+    $ref: paths/auth_2fa_setup.yaml
+  /auth/2fa/verify:
+    $ref: paths/auth_2fa_verify.yaml
 components:
   schemas:
     User:
       $ref: components/schemas/User.yaml
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

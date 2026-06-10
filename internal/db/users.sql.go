@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,8 +44,50 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 	return i, err
 }
 
+const enableOTP = `-- name: EnableOTP :exec
+UPDATE users
+SET otp_enabled = true
+WHERE id = $1
+`
+
+func (q *Queries) EnableOTP(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, enableOTP, id)
+	return err
+}
+
+const getUserByID = `-- name: GetUserByID :one
+SELECT id, username, password_hash, email, created_at, otp_enabled, otp_secret
+FROM users
+WHERE id = $1
+`
+
+type GetUserByIDRow struct {
+	ID           uuid.UUID
+	Username     string
+	PasswordHash string
+	Email        string
+	CreatedAt    time.Time
+	OtpEnabled   sql.NullBool
+	OtpSecret    sql.NullString
+}
+
+func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getUserByID, id)
+	var i GetUserByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.Email,
+		&i.CreatedAt,
+		&i.OtpEnabled,
+		&i.OtpSecret,
+	)
+	return i, err
+}
+
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, password_hash, email, created_at
+SELECT id, username, password_hash, email, created_at, otp_enabled, otp_secret
 FROM users
 WHERE username = $1
 `
@@ -55,6 +98,8 @@ type GetUserByUsernameRow struct {
 	PasswordHash string
 	Email        string
 	CreatedAt    time.Time
+	OtpEnabled   sql.NullBool
+	OtpSecret    sql.NullString
 }
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error) {
@@ -66,6 +111,24 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 		&i.PasswordHash,
 		&i.Email,
 		&i.CreatedAt,
+		&i.OtpEnabled,
+		&i.OtpSecret,
 	)
 	return i, err
+}
+
+const updateOTPSecret = `-- name: UpdateOTPSecret :exec
+UPDATE users
+SET otp_secret = $2
+WHERE id = $1
+`
+
+type UpdateOTPSecretParams struct {
+	ID        uuid.UUID
+	OtpSecret sql.NullString
+}
+
+func (q *Queries) UpdateOTPSecret(ctx context.Context, arg UpdateOTPSecretParams) error {
+	_, err := q.db.ExecContext(ctx, updateOTPSecret, arg.ID, arg.OtpSecret)
+	return err
 }

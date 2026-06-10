@@ -17,7 +17,7 @@ post:
             - password
   responses:
     '200':
-      description: Успешный вход
+      description: Успешный вход (без 2FA)
       content:
         application/json:
           schema:
@@ -25,12 +25,16 @@ post:
             properties:
               token:
                 type: string
-    '401':
-      description: Неверные учетные данные
+    '202':
+      description: Требуется 2FA
       content:
         application/json:
           schema:
             type: object
             properties:
-              error:
+              temp_token:
                 type: string
+              message:
+                type: string
+    '401':
+      description: Неверные учётные данные
