@@ -1,0 +1,21 @@
+post:
+  operationId: setup2FA
+  summary: Начать настройку 2FA (генерирует секрет и QR-код)
+  security:
+    - BearerAuth: []
+  responses:
+    '200':
+      description: Секрет и QR-код
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              secret:
+                type: string
+              qr_url:
+                type: string
+    '401':
+      description: Не авторизован
+    '409':
+      description: 2FA уже включена

@@ -6,6 +6,7 @@ package api
 import (
 	"bytes"
 	"compress/flate"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -17,6 +18,18 @@ import (
 	"github.com/go-chi/chi/v5"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
+
+const (
+	BearerAuthScopes bearerAuthContextKey = "BearerAuth.Scopes"
+)
+
+// bearerAuthContextKey is the context key for BearerAuth security scheme
+type bearerAuthContextKey string
+
+// Verify2FAJSONBody defines parameters for Verify2FA.
+type Verify2FAJSONBody struct {
+	Code string `json:"code"`
+}
 
 // LoginJSONBody defines parameters for Login.
 type LoginJSONBody struct {
@@ -36,6 +49,9 @@ type RegisterJSONBody struct {
 	Username string `json:"username"`
 }
 
+// Verify2FAJSONRequestBody defines body for Verify2FA for application/json ContentType.
+type Verify2FAJSONRequestBody Verify2FAJSONBody
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody LoginJSONBody
 
@@ -44,6 +60,12 @@ type RegisterJSONRequestBody RegisterJSONBody
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// Начать настройку 2FA (генерирует секрет и QR-код)
+	// (POST /auth/2fa/setup)
+	Setup2FA(w http.ResponseWriter, r *http.Request)
+	// Подтвердить код и активировать 2FA
+	// (POST /auth/2fa/verify)
+	Verify2FA(w http.ResponseWriter, r *http.Request)
 	// Вход в систему
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
@@ -55,6 +77,18 @@ type ServerInterface interface {
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// Начать настройку 2FA (генерирует секрет и QR-код)
+// (POST /auth/2fa/setup)
+func (_ Unimplemented) Setup2FA(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Подтвердить код и активировать 2FA
+// (POST /auth/2fa/verify)
+func (_ Unimplemented) Verify2FA(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // Вход в систему
 // (POST /auth/login)
@@ -76,6 +110,46 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// Setup2FA operation middleware
+func (siw *ServerInterfaceWrapper) Setup2FA(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Setup2FA(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Verify2FA operation middleware
+func (siw *ServerInterfaceWrapper) Verify2FA(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Verify2FA(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // Login operation middleware
 func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
@@ -219,6 +293,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/auth/2fa/setup", wrapper.Setup2FA)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/auth/2fa/verify", wrapper.Verify2FA)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/login", wrapper.Login)
 	})
 	r.Group(func(r chi.Router) {
@@ -233,18 +313,23 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

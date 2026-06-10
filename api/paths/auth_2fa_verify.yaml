@@ -1,0 +1,23 @@
+post:
+  operationId: verify2FA
+  summary: Подтвердить код и активировать 2FA
+  security:
+    - BearerAuth: []
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            code:
+              type: string
+          required:
+            - code
+  responses:
+    '200':
+      description: 2FA активирована
+    '400':
+      description: Неверный код или формат
+    '401':
+      description: Не авторизован

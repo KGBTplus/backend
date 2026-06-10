@@ -18,4 +18,5 @@ type User struct {
 	CreatedAt    time.Time
 	Email        string
 	OtpSecret    sql.NullString
+	OtpEnabled   sql.NullBool
 }
