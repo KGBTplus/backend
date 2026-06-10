@@ -15,6 +15,7 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/go-chi/chi/v5"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // LoginJSONBody defines parameters for Login.
@@ -25,7 +26,13 @@ type LoginJSONBody struct {
 
 // RegisterJSONBody defines parameters for Register.
 type RegisterJSONBody struct {
+	// Email Должен быть корректный email
+	Email openapi_types.Email `json:"email"`
+
+	// Password От 8 до 20 символов
 	Password string `json:"password"`
+
+	// Username От 4 до 16 символов
 	Username string `json:"username"`
 }
 
@@ -226,15 +233,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"3JNPbxM9EMa/ympO7yutki2FA3ujt0ocEBwRB7MxiUtiG9sBRVEkkqhQRKVI3Pkj8QXCttsG0m6+wsw3",
-	"QrYphSrlQA+VOEWOx7O/55lnhlConlaSS2chH45SEPKJgnwITrguhxwecJZsMee6PLlzbxtSeM6NFUpC",
-	"DhuNrJHBKAWluWRaQA6bjayxCSlo5jq+ITRZ33WaXdUW0h+1ss7/Ks0Nc0LJ7RbkcDdcp2D4sz63bku1",
-	"Br6oUNJxGeqZ1l1RhBfNHatCL1t0eI+Frsb3c4KHT2pm7QtlWkHFQHsR1hkh2x61b7mRrMfXXI4igDC8",
-	"BfnD88r0vOOj9OyRerzDCwej31850+fhD6uVtBHnRpZdQYxTT7lcD7uGpMVtYYR2cT74mca4wor28JTe",
-	"4tcES9rFGg+9ETezjStgcWOU+Vus91hhiRW9DFhVQlN6jRVNfhzxEOd4Gg+ho+33eswM/NN3UUCCZUJj",
-	"XNCYJljhCU1DYQyb4W1hHTeX5+3+WcU/G7kw2wu2f8Qal7SPx1hjifPg3JL2vf0/Y4K197XG4ziEGJTs",
-	"uoLygfZwgV/wG84Tj4xLXHgweoULXPwSFNpN/sMycJ9gjUdBCK68MprEUK2C+tn/UdLt65J0+RDwyK/C",
-	"mKb0BqsQ7JKmfi088a04hD/4Q+OwUXGv5hf35hNWeBD3xV97A2mWeJuCbQfBrrVoMy9j9D0AAP//",
+	"xFTLThtJFP2VUq1mpJbdBgYxvRt2SCxGM8vRLDp2YTdxd3Wqy0kQsuRHHkQgIUXZhkTKDxhDB2Pj9i+c",
+	"+0dRVeEQiEMUiJSVfavu45zT59Yur8o4lYlIdMaD3bbHo2RL8mCX60g3BQ/4vyJk66HWTcH++nuDe/yx",
+	"UFkkEx7wSskv+bztcZmKJEwjHvDlkl9a5h5PQ90wDXk5bOlGuSnrUWLCVGba/MpUqFBHMtmo8YBv2muP",
+	"K/GoJTK9Lms7JqkqEy0Smx+maTOq2orydiZtr6zaEHFouyrTT0fCjkzDLHsiVc2y2EkNiUyrKKkbqK1M",
+	"qCSMxYLLtgMQKVHjwX9Xmd5Vx/+9eZF8sC2qmrevV2nVEvYgS2WSOThLvn8PMlo+FMlisAuQ1ERWVVGq",
+	"3ffBB+pihpz2MKV9nDMM6TkKnBohVvzKPWAJpaS6K6y3yDFETh0LK2fUp5fIqXcZ4hQDTF1gO2atOA7V",
+	"jil97QgwDBl1MaIu9ZDjgvo20ZlNiXqUaaG+7bd/5hk/y3IiDqOm+XOD6RsUmOAjckwZjmmfenTAMEZB",
+	"Heogx/iS9DlzHTy+JVUcah7w+cFXDv7S3jfGHVGPrRn9CrbkW4FwgaHFUGDIPR6HTzdFUtcNHiz5Ho+j",
+	"ZB6uebfvyoJJK25SZfU7kyqr1yateHdYPO9Sj7stYGUBg3cGLB3gzADGwPpoQgfGjJ+XBoWhVuDMWdKt",
+	"jf+r1uaI9jDCMcYYMAMZE4wMMHqBEUbsN5zak6m5Np8jxxSjMmYYUMeSPfQYZoYf9VDMPecxTK/t4zmj",
+	"Z8aguDCq/O5I//kjCnYZ9TDA2KC4gpK7YIKRG8yobzaDUZf69Aq5hTWkvnkJzNA/nNK3iEBdC9pBH9x8",
+	"Kt4jx4l7Isy1UYkODdnCGvUEBcNsIYVDI3/7UwAAAP//",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
