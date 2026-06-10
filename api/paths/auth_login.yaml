@@ -1,0 +1,36 @@
+post:
+  operationId: login
+  summary: Вход в систему
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            username:
+              type: string
+            password:
+              type: string
+          required:
+            - username
+            - password
+  responses:
+    '200':
+      description: Успешный вход
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              token:
+                type: string
+    '401':
+      description: Неверные учетные данные
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string

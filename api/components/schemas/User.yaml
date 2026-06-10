@@ -1,7 +1,4 @@
 type: object
-required:
-  - id
-  - username
 properties:
   id:
     type: string
@@ -11,3 +8,6 @@ properties:
   created_at:
     type: string
     format: date-time
+required:
+  - id
+  - username

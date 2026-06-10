@@ -6,19 +6,15 @@ package api
 import (
 	"bytes"
 	"compress/flate"
-	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"path"
 	"strings"
-	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/go-chi/chi/v5"
-	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // LoginJSONBody defines parameters for Login.
@@ -27,14 +23,26 @@ type LoginJSONBody struct {
 	Username string `json:"username"`
 }
 
+// RegisterJSONBody defines parameters for Register.
+type RegisterJSONBody struct {
+	Password string `json:"password"`
+	Username string `json:"username"`
+}
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody LoginJSONBody
+
+// RegisterJSONRequestBody defines body for Register for application/json ContentType.
+type RegisterJSONRequestBody RegisterJSONBody
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Вход в систему
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
+	// Регистрация нового пользователя
+	// (POST /auth/register)
+	Register(w http.ResponseWriter, r *http.Request)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -44,6 +52,12 @@ type Unimplemented struct{}
 // Вход в систему
 // (POST /auth/login)
 func (_ Unimplemented) Login(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Регистрация нового пользователя
+// (POST /auth/register)
+func (_ Unimplemented) Register(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -61,6 +75,20 @@ func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Login(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Register operation middleware
+func (siw *ServerInterfaceWrapper) Register(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Register(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -186,104 +214,11 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/login", wrapper.Login)
 	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/auth/register", wrapper.Register)
+	})
 
 	return r
-}
-
-type LoginRequestObject struct {
-	Body *LoginJSONRequestBody
-}
-
-type LoginResponseObject interface {
-	VisitLoginResponse(w http.ResponseWriter) error
-}
-
-type Login200JSONResponse struct {
-	Token *string `json:"token,omitempty"`
-	User  *struct {
-		CreatedAt *time.Time         `json:"created_at,omitempty"`
-		Id        openapi_types.UUID `json:"id"`
-		Username  string             `json:"username"`
-	} `json:"user,omitempty"`
-}
-
-func (response Login200JSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-// StrictServerInterface represents all server handlers.
-type StrictServerInterface interface {
-	// Вход в систему
-	// (POST /auth/login)
-	Login(ctx context.Context, request LoginRequestObject) (LoginResponseObject, error)
-}
-
-type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
-type StrictMiddlewareFunc func(f StrictHandlerFunc, operationID string) StrictHandlerFunc
-
-type StrictHTTPServerOptions struct {
-	RequestErrorHandlerFunc  func(w http.ResponseWriter, r *http.Request, err error)
-	ResponseErrorHandlerFunc func(w http.ResponseWriter, r *http.Request, err error)
-}
-
-func NewStrictHandler(ssi StrictServerInterface, middlewares []StrictMiddlewareFunc) ServerInterface {
-	return &strictHandler{ssi: ssi, middlewares: middlewares, options: StrictHTTPServerOptions{
-		RequestErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		},
-		ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		},
-	}}
-}
-
-func NewStrictHandlerWithOptions(ssi StrictServerInterface, middlewares []StrictMiddlewareFunc, options StrictHTTPServerOptions) ServerInterface {
-	return &strictHandler{ssi: ssi, middlewares: middlewares, options: options}
-}
-
-type strictHandler struct {
-	ssi         StrictServerInterface
-	middlewares []StrictMiddlewareFunc
-	options     StrictHTTPServerOptions
-}
-
-// Login operation middleware
-func (sh *strictHandler) Login(w http.ResponseWriter, r *http.Request) {
-	var request LoginRequestObject
-
-	var body LoginJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.Login(ctx, request.(LoginRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "Login")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(LoginResponseObject); ok {
-		if err := validResponse.VisitLoginResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
 }
 
 // Base64 encoded, compressed with deflate, json marshaled OpenAPI spec.
@@ -291,13 +226,15 @@ func (sh *strictHandler) Login(w http.ResponseWriter, r *http.Request) {
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"pJJPqtRAEMavEkqXMYm+XXa+3QMXgrgSGdp0zUyPSVfbXVGGIYtRBMGdV/AGgwMK/rlC942kO8MENbOQ",
-	"t+uu71dF1Ve1g4Y6Qxo1O6h34Jo1diI9J2Fxii6eOrRRMpYMWlY4ghYFo1wIjr8l2S6+QArGe6w6hBx4",
-	"axBqcGyVXsGQg5J/sH2v5BzWO7RadBjhv8QhB4uvemVRQv0MUv4Zf36uRS822DAMkVd6SamS4jZqT1Bk",
-	"14K5xezh4xvI4TVap0hDDfeLqqhiB2RQC6OghquiKq4gByN4neYuRc/rsqWV0skUcsmAaI1gRfpGQg2P",
-	"kjz2io6vSW5HczWjTrwwplVNyig3jvS0hn+tNsK5N2TljB//Y9aZzKeK85ZNWWx7TAFnSLuxnQdVdYth",
-	"mF6ivjhJFO5aXEINd8rpFsvTLZaXzjN2PTOIRNdYZXhcr/8c9v6XP4YP/kf46L9l/hDe+5/+S0p3fdcJ",
-	"u43cpzGc+UMW9v5r2Ie3/ui/h3ex6vA7AAD//w==",
+	"3JNPbxM9EMa/ympO7yutki2FA3ujt0ocEBwRB7MxiUtiG9sBRVEkkqhQRKVI3Pkj8QXCttsG0m6+wsw3",
+	"QrYphSrlQA+VOEWOx7O/55lnhlConlaSS2chH45SEPKJgnwITrguhxwecJZsMee6PLlzbxtSeM6NFUpC",
+	"DhuNrJHBKAWluWRaQA6bjayxCSlo5jq+ITRZ33WaXdUW0h+1ss7/Ks0Nc0LJ7RbkcDdcp2D4sz63bku1",
+	"Br6oUNJxGeqZ1l1RhBfNHatCL1t0eI+Frsb3c4KHT2pm7QtlWkHFQHsR1hkh2x61b7mRrMfXXI4igDC8",
+	"BfnD88r0vOOj9OyRerzDCwej31850+fhD6uVtBHnRpZdQYxTT7lcD7uGpMVtYYR2cT74mca4wor28JTe",
+	"4tcES9rFGg+9ETezjStgcWOU+Vus91hhiRW9DFhVQlN6jRVNfhzxEOd4Gg+ho+33eswM/NN3UUCCZUJj",
+	"XNCYJljhCU1DYQyb4W1hHTeX5+3+WcU/G7kw2wu2f8Qal7SPx1hjifPg3JL2vf0/Y4K197XG4ziEGJTs",
+	"uoLygfZwgV/wG84Tj4xLXHgweoULXPwSFNpN/sMycJ9gjUdBCK68MprEUK2C+tn/UdLt65J0+RDwyK/C",
+	"mKb0BqsQ7JKmfi088a04hD/4Q+OwUXGv5hf35hNWeBD3xV97A2mWeJuCbQfBrrVoMy9j9D0AAP//",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
