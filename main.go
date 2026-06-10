@@ -30,14 +30,13 @@ func runMigrations(db *sql.DB) {
 func main() {
 	// 1. Подключение к БД
 	connStr := "postgres://user:password@localhost:5432/game?sslmode=disable"
-	conn, err := sql.Open("postgres", connStr)
 	dbConn, err := sql.Open("postgres", connStr)
 	if err != nil {
 		log.Fatalf("Ошибка подключения к БД: %v", err)
 	}
-	defer conn.Close()
+	defer dbConn.Close()
 
-	queries := db.New(conn)
+	queries := db.New(dbConn)
 
 	runMigrations(dbConn)
 
