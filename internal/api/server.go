@@ -26,8 +26,6 @@ const (
 	otpExpiry      = 5 * time.Minute
 )
 
-var jwtKey = []byte("my_secret_key") // TODO: вынести в ENV
-
 type SMTPConfig struct {
 	Host     string
 	Username string
@@ -41,18 +39,23 @@ type otpEntry struct {
 }
 
 type Server struct {
-	DB   *db.Queries
-	SMTP SMTPConfig
-	mu   sync.Mutex
-	// ключ: "login:<userID>" или "setup:<userID>"
-	codes map[string]otpEntry
+	DB     *db.Queries
+	SMTP   SMTPConfig
+	JWTKey []byte
+	mu     sync.Mutex
+	codes  map[string]otpEntry
 }
 
-func NewServer(db *db.Queries, smtp SMTPConfig) *Server {
+func NewServer(db *db.Queries, smtp SMTPConfig, jwtSecret string) *Server {
+	key := []byte(jwtSecret)
+	if len(key) == 0 {
+		key = []byte("my_secret_key")
+	}
 	return &Server{
-		DB:    db,
-		SMTP:  smtp,
-		codes: make(map[string]otpEntry),
+		DB:     db,
+		SMTP:   smtp,
+		JWTKey: key,
+		codes:  make(map[string]otpEntry),
 	}
 }
 
@@ -64,7 +67,7 @@ func sendError(w http.ResponseWriter, code int, message string) {
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
-func getUserIDFromToken(r *http.Request) (uuid.UUID, error) {
+func (s *Server) getUserIDFromToken(r *http.Request) (uuid.UUID, error) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
 		return uuid.Nil, errors.New("missing Authorization header")
@@ -76,7 +79,7 @@ func getUserIDFromToken(r *http.Request) (uuid.UUID, error) {
 	tokenStr := parts[1]
 
 	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
-		return jwtKey, nil
+		return s.JWTKey, nil
 	})
 	if err != nil || !token.Valid {
 		return uuid.Nil, errors.New("invalid token")
@@ -96,9 +99,9 @@ func getUserIDFromToken(r *http.Request) (uuid.UUID, error) {
 	return userID, nil
 }
 
-func parseTempToken(tokenStr string) (uuid.UUID, error) {
+func (s *Server) parseTempToken(tokenStr string) (uuid.UUID, error) {
 	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
-		return jwtKey, nil
+		return s.JWTKey, nil
 	})
 	if err != nil || !token.Valid {
 		return uuid.Nil, errors.New("invalid temp token")
@@ -252,7 +255,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 			"exp":  time.Now().Add(otpExpiry).Unix(),
 			"type": "temp",
 		})
-		tokenString, err := tempToken.SignedString(jwtKey)
+		tokenString, err := tempToken.SignedString(s.JWTKey)
 		if err != nil {
 			sendError(w, http.StatusInternalServerError, "Ошибка создания временного токена")
 			return
@@ -271,7 +274,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		"sub": user.ID.String(),
 		"exp": time.Now().Add(time.Hour * 24).Unix(),
 	})
-	tokenString, err := token.SignedString(jwtKey)
+	tokenString, err := token.SignedString(s.JWTKey)
 	if err != nil {
 		sendError(w, http.StatusInternalServerError, "Ошибка создания токена")
 		return
@@ -294,7 +297,7 @@ func (s *Server) Authenticate2FA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, err := parseTempToken(req.TempToken)
+	userID, err := s.parseTempToken(req.TempToken)
 	if err != nil {
 		sendError(w, http.StatusUnauthorized, "Неверный или истёкший temp_token")
 		return
@@ -322,7 +325,7 @@ func (s *Server) Authenticate2FA(w http.ResponseWriter, r *http.Request) {
 		"sub": userID.String(),
 		"exp": time.Now().Add(time.Hour * 24).Unix(),
 	})
-	tokenString, err := token.SignedString(jwtKey)
+	tokenString, err := token.SignedString(s.JWTKey)
 	if err != nil {
 		sendError(w, http.StatusInternalServerError, "Ошибка создания токена")
 		return
@@ -335,7 +338,7 @@ func (s *Server) Authenticate2FA(w http.ResponseWriter, r *http.Request) {
 // ---------- 2FA настройка (отправка кода на email) ----------
 
 func (s *Server) Setup2FA(w http.ResponseWriter, r *http.Request) {
-	userID, err := getUserIDFromToken(r)
+	userID, err := s.getUserIDFromToken(r)
 	if err != nil {
 		sendError(w, http.StatusUnauthorized, "Не авторизован")
 		return
@@ -371,7 +374,7 @@ func (s *Server) Setup2FA(w http.ResponseWriter, r *http.Request) {
 // ---------- 2FA подтверждение и активация ----------
 
 func (s *Server) Verify2FA(w http.ResponseWriter, r *http.Request) {
-	userID, err := getUserIDFromToken(r)
+	userID, err := s.getUserIDFromToken(r)
 	if err != nil {
 		sendError(w, http.StatusUnauthorized, "Не авторизован")
 		return
