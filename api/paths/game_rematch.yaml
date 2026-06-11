@@ -1,0 +1,42 @@
+post:
+  operationId: requestRematch
+  summary: Запросить реванш
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: gameId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    '200':
+      description: Реванш принят, создана новая игра
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              new_game_id:
+                type: string
+                format: uuid
+    '202':
+      description: Запрос на реванш отправлен, ожидание согласия соперника
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status:
+                type: string
+                enum:
+                  - waiting_for_opponent
+    '401':
+      description: Не авторизован
+    '404':
+      description: Игра не найдена
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml

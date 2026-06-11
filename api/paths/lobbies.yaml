@@ -1,0 +1,55 @@
+get:
+  operationId: listLobbies
+  summary: Список доступных лобби
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: status
+      in: query
+      description: Фильтр по статусу
+      schema:
+        type: string
+        enum:
+          - waiting
+          - in_game
+    - name: page
+      in: query
+      schema:
+        type: integer
+        default: 1
+    - name: limit
+      in: query
+      schema:
+        type: integer
+        default: 20
+  responses:
+    '200':
+      description: Список лобби
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: ../components/schemas/Lobby.yaml
+    '401':
+      description: Не авторизован
+post:
+  operationId: createLobby
+  summary: Создать новое лобби
+  security:
+    - BearerAuth: []
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/CreateLobbyRequest.yaml
+  responses:
+    '201':
+      description: Лобби создано
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/CreateLobbyResponse.yaml
+    '401':
+      description: Не авторизован

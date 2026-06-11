@@ -1,0 +1,42 @@
+type: object
+properties:
+  game_id:
+    type: string
+    format: uuid
+  winner_id:
+    type: string
+    format: uuid
+    nullable: true
+  winner_username:
+    type: string
+  players:
+    type: array
+    items:
+      type: object
+      properties:
+        player_id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        hits:
+          type: integer
+        misses:
+          type: integer
+        ships_sunk:
+          type: integer
+      required:
+        - player_id
+        - username
+        - hits
+        - misses
+        - ships_sunk
+  finished_at:
+    type: string
+    format: date-time
+required:
+  - game_id
+  - winner_id
+  - winner_username
+  - players
+  - finished_at

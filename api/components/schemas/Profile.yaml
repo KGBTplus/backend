@@ -1,0 +1,34 @@
+type: object
+properties:
+  id:
+    type: string
+    format: uuid
+  username:
+    type: string
+  email:
+    type: string
+    format: email
+  created_at:
+    type: string
+    format: date-time
+  stats:
+    type: object
+    properties:
+      wins:
+        type: integer
+      losses:
+        type: integer
+      total_games:
+        type: integer
+      win_rate:
+        type: number
+        format: float
+      hit_rate:
+        type: number
+        format: float
+required:
+  - id
+  - username
+  - email
+  - created_at
+  - stats

@@ -1,6 +1,6 @@
-post:
-  operationId: makeMove
-  summary: Сделать ход (выстрел)
+get:
+  operationId: getGameResult
+  summary: Получить результаты завершённой игры
   security:
     - BearerAuth: []
   parameters:
@@ -10,25 +10,13 @@ post:
       schema:
         type: string
         format: uuid
-  requestBody:
-    required: true
-    content:
-      application/json:
-        schema:
-          $ref: ../components/schemas/MoveRequest.yaml
   responses:
     '200':
-      description: Результат хода
+      description: Результаты игры
       content:
         application/json:
           schema:
-            $ref: ../components/schemas/MoveResponse.yaml
-    '400':
-      description: Некорректные координаты или не ваш ход
-      content:
-        application/json:
-          schema:
-            $ref: ../components/schemas/Error.yaml
+            $ref: ../components/schemas/GameResult.yaml
     '401':
       description: Не авторизован
     '403':
@@ -38,7 +26,7 @@ post:
           schema:
             $ref: ../components/schemas/Error.yaml
     '404':
-      description: Игра не найдена
+      description: Игра не найдена или ещё не завершена
       content:
         application/json:
           schema:

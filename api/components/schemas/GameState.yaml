@@ -1,0 +1,60 @@
+type: object
+properties:
+  id:
+    type: string
+    format: uuid
+  player1:
+    type: object
+    properties:
+      id:
+        type: string
+        format: uuid
+      username:
+        type: string
+    required:
+      - id
+      - username
+  player2:
+    type: object
+    properties:
+      id:
+        type: string
+        format: uuid
+      username:
+        type: string
+    required:
+      - id
+      - username
+  status:
+    type: string
+    enum:
+      - in_progress
+      - finished
+  current_turn:
+    type: string
+    format: uuid
+  winner_id:
+    type: string
+    format: uuid
+    nullable: true
+  moves:
+    type: array
+    items:
+      type: object
+      properties:
+        player_id:
+          type: string
+          format: uuid
+        x:
+          type: integer
+        y:
+          type: integer
+        hit:
+          type: boolean
+required:
+  - id
+  - player1
+  - player2
+  - status
+  - current_turn
+  - moves

@@ -1,6 +1,6 @@
-post:
-  operationId: makeMove
-  summary: Сделать ход (выстрел)
+get:
+  operationId: getGameState
+  summary: Получить текущее состояние игры
   security:
     - BearerAuth: []
   parameters:
@@ -10,25 +10,13 @@ post:
       schema:
         type: string
         format: uuid
-  requestBody:
-    required: true
-    content:
-      application/json:
-        schema:
-          $ref: ../components/schemas/MoveRequest.yaml
   responses:
     '200':
-      description: Результат хода
+      description: Состояние игры
       content:
         application/json:
           schema:
-            $ref: ../components/schemas/MoveResponse.yaml
-    '400':
-      description: Некорректные координаты или не ваш ход
-      content:
-        application/json:
-          schema:
-            $ref: ../components/schemas/Error.yaml
+            $ref: ../components/schemas/GameState.yaml
     '401':
       description: Не авторизован
     '403':
