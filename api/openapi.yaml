@@ -11,6 +11,8 @@ paths:
     $ref: paths/auth_2fa_setup.yaml
   /auth/2fa/verify:
     $ref: paths/auth_2fa_verify.yaml
+  /auth/2fa/authenticate:
+    $ref: paths/auth_2fa_authenticate.yaml
 components:
   schemas:
     User:
