@@ -11,24 +11,31 @@ properties:
   created_at:
     type: string
     format: date-time
-  stats:
-    type: object
-    properties:
-      wins:
-        type: integer
-      losses:
-        type: integer
-      total_games:
-        type: integer
-      win_rate:
-        type: number
-        format: float
-      hit_rate:
-        type: number
-        format: float
+  total_games:
+    type: integer
+  wins:
+    type: integer
+  losses:
+    type: integer
+  win_percentage:
+    type: number
+    format: float
+  hit_percentage:
+    type: number
+    format: float
+  ships_sunk:
+    type: integer
+  total_shots:
+    type: integer
+  hits:
+    type: integer
 required:
   - id
   - username
   - email
   - created_at
-  - stats
+  - total_games
+  - wins
+  - losses
+  - win_percentage
+  - hit_percentage

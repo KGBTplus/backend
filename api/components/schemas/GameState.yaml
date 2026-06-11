@@ -11,9 +11,17 @@ properties:
         format: uuid
       username:
         type: string
+      ships_placed:
+        type: boolean
+        description: Расставил ли корабли
+      ready:
+        type: boolean
+        description: Подтвердил ли готовность
     required:
       - id
       - username
+      - ships_placed
+      - ready
   player2:
     type: object
     properties:
@@ -22,39 +30,68 @@ properties:
         format: uuid
       username:
         type: string
+      ships_placed:
+        type: boolean
+      ready:
+        type: boolean
+    nullable: true
     required:
       - id
       - username
+      - ships_placed
+      - ready
   status:
     type: string
     enum:
-      - in_progress
+      - waiting
+      - placing_ships
+      - playing
       - finished
   current_turn:
     type: string
     format: uuid
+    nullable: true
   winner_id:
     type: string
     format: uuid
     nullable: true
+  win_reason:
+    type: string
+    enum:
+      - all_ships_sunk
+      - forfeit
+      - timeout
+    nullable: true
+  ships:
+    type: array
+    items:
+      $ref: ./Ship.yaml
+    description: Корабли текущего игрока (запрашивающего)
   moves:
     type: array
     items:
-      type: object
-      properties:
-        player_id:
-          type: string
-          format: uuid
-        x:
-          type: integer
-        y:
-          type: integer
-        hit:
-          type: boolean
+      $ref: ./Move.yaml
+  placement_deadline:
+    type: string
+    format: date-time
+    nullable: true
+    description: До какого времени нужно расставить корабли
+  move_deadline:
+    type: string
+    format: date-time
+    nullable: true
+    description: До какого времени нужно сделать ход
+  created_at:
+    type: string
+    format: date-time
+  finished_at:
+    type: string
+    format: date-time
+    nullable: true
 required:
   - id
   - player1
-  - player2
   - status
-  - current_turn
+  - ships
   - moves
+  - created_at

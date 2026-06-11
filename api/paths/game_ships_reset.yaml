@@ -1,0 +1,35 @@
+post:
+  operationId: resetShips
+  summary: Сбросить расстановку и готовность (вернуться к редактированию)
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: gameId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    '200':
+      description: Расстановка сброшена, можно редактировать заново
+    '401':
+      description: Не авторизован
+    '403':
+      description: Вы не участник этой игры
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml
+    '404':
+      description: Игра не найдена
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml
+    '409':
+      description: Игра уже началась, нельзя изменить расстановку
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml

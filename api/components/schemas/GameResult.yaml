@@ -9,6 +9,13 @@ properties:
     nullable: true
   winner_username:
     type: string
+  win_reason:
+    type: string
+    enum:
+      - all_ships_sunk
+      - forfeit
+      - timeout
+    description: Причина окончания игры
   players:
     type: array
     items:
@@ -25,6 +32,9 @@ properties:
           type: integer
         ships_sunk:
           type: integer
+        ships_lost:
+          type: integer
+          description: Сколько кораблей потерял
       required:
         - player_id
         - username
@@ -38,5 +48,6 @@ required:
   - game_id
   - winner_id
   - winner_username
+  - win_reason
   - players
   - finished_at

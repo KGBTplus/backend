@@ -18,6 +18,11 @@ properties:
       - closed
   player_count:
     type: integer
+  game_id:
+    type: string
+    format: uuid
+    nullable: true
+    description: ID игры, когда лобби перешло в статус in_game
   created_at:
     type: string
     format: date-time

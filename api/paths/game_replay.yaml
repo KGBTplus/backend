@@ -1,0 +1,33 @@
+get:
+  operationId: getGameReplay
+  summary: Полные данные для реплея (начальные позиции + все ходы)
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: gameId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    '200':
+      description: Данные для реплея
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/GameReplay.yaml
+    '401':
+      description: Не авторизован
+    '403':
+      description: Вы не участник этой игры
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml
+    '404':
+      description: Игра не найдена
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml
