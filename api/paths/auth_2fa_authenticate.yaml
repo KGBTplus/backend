@@ -1,8 +1,6 @@
 post:
-  operationId: verify2FA
-  summary: Подтвердить код с email и активировать 2FA
-  security:
-    - BearerAuth: []
+  operationId: authenticate2FA
+  summary: Подтвердить 2FA код и получить JWT
   requestBody:
     required: true
     content:
@@ -10,21 +8,22 @@ post:
         schema:
           type: object
           properties:
+            temp_token:
+              type: string
             code:
               type: string
           required:
+            - temp_token
             - code
   responses:
     '200':
-      description: 2FA активирована
+      description: Успешная аутентификация, выдан JWT
       content:
         application/json:
           schema:
             type: object
             properties:
-              status:
+              token:
                 type: string
-    '400':
-      description: Неверный код или формат
     '401':
-      description: Не авторизован
+      description: Неверный код или истёк срок temp_token

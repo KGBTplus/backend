@@ -3,8 +3,9 @@
 ## Quick start
 
 ```bash
-docker compose up -d        # PostgreSQL on :5432, Adminer on :8081
-go run main.go              # starts on :8080, runs goose migrations on startup
+cp .env.example .env   # настроить SMTP (необязательно)
+docker compose up -d   # PostgreSQL on :5432, Adminer on :8081
+go run main.go         # starts on :8080, runs goose migrations on startup
 ```
 
 ## Code generation
@@ -31,16 +32,21 @@ Regenerate after changing the OpenAPI spec or SQL queries.
 All `POST`:
 
 - `/auth/register` — username (4-16), password (8-20), email; returns created user
-- `/auth/login` — username + password; returns JWT (24h expiry, HS256, `sub` = user UUID)
-- `/auth/2fa/setup` — Bearer JWT; returns TOTP secret + QR URL
-- `/auth/2fa/verify` — Bearer JWT + `{code}`; enables 2FA
+- `/auth/login` — username + password; if 2FA enabled → HTTP 202 + `temp_token`, код на email; иначе JWT
+- `/auth/2fa/setup` — Bearer JWT; отправляет код на email
+- `/auth/2fa/verify` — Bearer JWT + `{code}`; активирует 2FA
+- `/auth/2fa/authenticate` — `{temp_token, code}`; проверяет код, выдаёт JWT
 
 Swagger UI at `/swagger/`.
 
+## SMTP
+
+Настройки в `.env` (см. `.env.example`). Если `SMTP_HOST` не задан — код печатается в лог.
+
 ## Constraints
 
-- DB connstring hardcoded in `main.go:32` — `postgres://user:password@localhost:5432/game?sslmode=disable`
-- JWT secret hardcoded in `server.go:27` — `my_secret_key` (TODO: move to env)
+- DB connstring hardcoded in `main.go` — `postgres://user:password@localhost:5432/game?sslmode=disable`
+- JWT secret hardcoded in `server.go` — `my_secret_key` (TODO: move to env)
 - oapi-codegen uses `chi-server: true` + `embedded-spec: true` + `strict-server: false` (handlers passed directly, not via ServerInterface)
 - goose migrations run automatically on every startup via `runMigrations()`
 - All handlers use Russian-language error messages
