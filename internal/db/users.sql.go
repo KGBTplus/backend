@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
@@ -110,4 +111,20 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 		&i.EmailOtpEnabled,
 	)
 	return i, err
+}
+
+const updateOTPSecret = `-- name: UpdateOTPSecret :exec
+UPDATE users
+SET otp_secret = $2
+WHERE id = $1
+`
+
+type UpdateOTPSecretParams struct {
+	ID        uuid.UUID
+	OtpSecret sql.NullString
+}
+
+func (q *Queries) UpdateOTPSecret(ctx context.Context, arg UpdateOTPSecretParams) error {
+	_, err := q.db.ExecContext(ctx, updateOTPSecret, arg.ID, arg.OtpSecret)
+	return err
 }

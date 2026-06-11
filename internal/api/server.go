@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"database/sql"
+
 	"github.com/KGBTplus/backend/internal/db"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
