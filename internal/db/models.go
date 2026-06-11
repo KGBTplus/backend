@@ -10,6 +10,16 @@ import (
 	"github.com/google/uuid"
 )
 
+type Profile struct {
+	UserID     uuid.UUID
+	TotalGames int32
+	Wins       int32
+	Losses     int32
+	ShipsSunk  int32
+	TotalShots int32
+	Hits       int32
+}
+
 type User struct {
 	ID              uuid.UUID
 	Username        string

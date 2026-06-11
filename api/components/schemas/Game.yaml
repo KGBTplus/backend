@@ -1,0 +1,41 @@
+type: object
+properties:
+  id:
+    type: string
+    format: uuid
+  player1_id:
+    type: string
+    format: uuid
+  player2_id:
+    type: string
+    format: uuid
+    nullable: true
+  status:
+    type: string
+    enum: [waiting, placing_ships, playing, finished]
+  current_turn:
+    type: string
+    format: uuid
+    nullable: true
+  winner_id:
+    type: string
+    format: uuid
+    nullable: true
+  ships:
+    type: array
+    items:
+      $ref: Ship.yaml
+  moves:
+    type: array
+    items:
+      $ref: Move.yaml
+  created_at:
+    type: string
+    format: date-time
+required:
+  - id
+  - player1_id
+  - status
+  - ships
+  - moves
+  - created_at

@@ -13,10 +13,30 @@ paths:
     $ref: paths/auth_2fa_verify.yaml
   /auth/2fa/authenticate:
     $ref: paths/auth_2fa_authenticate.yaml
+  /profile:
+    $ref: paths/profile_get.yaml
+  /games:
+    $ref: paths/games.yaml
+  /games/{gameId}:
+    $ref: paths/game_get.yaml
+  /games/{gameId}/join:
+    $ref: paths/game_join.yaml
+  /games/{gameId}/ships:
+    $ref: paths/game_ships.yaml
+  /games/{gameId}/move:
+    $ref: paths/game_move.yaml
 components:
   schemas:
     User:
       $ref: components/schemas/User.yaml
+    Profile:
+      $ref: components/schemas/Profile.yaml
+    Game:
+      $ref: components/schemas/Game.yaml
+    Ship:
+      $ref: components/schemas/Ship.yaml
+    Move:
+      $ref: components/schemas/Move.yaml
   securitySchemes:
     BearerAuth:
       type: http

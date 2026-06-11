@@ -15,6 +15,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -42,6 +43,7 @@ type Server struct {
 	DB     *db.Queries
 	SMTP   SMTPConfig
 	JWTKey []byte
+	Games  *GameStore
 	mu     sync.Mutex
 	codes  map[string]otpEntry
 }
@@ -55,6 +57,7 @@ func NewServer(db *db.Queries, smtp SMTPConfig, jwtSecret string) *Server {
 		DB:     db,
 		SMTP:   smtp,
 		JWTKey: key,
+		Games:  NewGameStore(),
 		codes:  make(map[string]otpEntry),
 	}
 }
@@ -204,6 +207,11 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sendError(w, http.StatusInternalServerError, "Ошибка при создании пользователя")
+		return
+	}
+
+	if err := s.DB.CreateProfile(r.Context(), userRow.ID); err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка при создании профиля")
 		return
 	}
 
@@ -424,4 +432,233 @@ func (s *Server) Verify2FA(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "2FA activated"})
+}
+
+// ---------- Профиль ----------
+
+func (s *Server) GetProfile(w http.ResponseWriter, r *http.Request) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	user, err := s.DB.GetUserByID(r.Context(), userID)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка получения пользователя")
+		return
+	}
+
+	profile, err := s.DB.GetProfile(r.Context(), userID)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка получения профиля")
+		return
+	}
+
+	var winPct, hitPct float64
+	if profile.TotalGames > 0 {
+		winPct = float64(profile.Wins) / float64(profile.TotalGames) * 100
+	}
+	if profile.TotalShots > 0 {
+		hitPct = float64(profile.Hits) / float64(profile.TotalShots) * 100
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":              user.ID,
+		"username":        user.Username,
+		"total_games":     profile.TotalGames,
+		"wins":            profile.Wins,
+		"losses":          profile.Losses,
+		"win_percentage":  winPct,
+		"ships_sunk":      profile.ShipsSunk,
+		"total_shots":     profile.TotalShots,
+		"hits":            profile.Hits,
+		"hit_percentage":  hitPct,
+	})
+}
+
+// ---------- Игры ----------
+
+func (s *Server) CreateGame(w http.ResponseWriter, r *http.Request) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+	game := s.Games.Create(userID)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(game)
+}
+
+func (s *Server) ListGames(w http.ResponseWriter, r *http.Request) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+	games := s.Games.ListAvailable(userID)
+	if games == nil {
+		games = []*GameRoom{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(games)
+}
+
+func (s *Server) GetGame(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
+	_, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	game, ok := s.Games.Get(uuid.UUID(gameID))
+	if !ok {
+		sendError(w, http.StatusNotFound, "Игра не найдена")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(game)
+}
+
+func (s *Server) JoinGame(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	ok := s.Games.Join(uuid.UUID(gameID), userID)
+	if !ok {
+		sendError(w, http.StatusConflict, "Не удалось присоединиться к игре")
+		return
+	}
+
+	game, _ := s.Games.Get(gameID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(game)
+}
+
+func (s *Server) PlaceShips(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	var req struct {
+		Ships []struct {
+			ShipType   int  `json:"ship_type"`
+			StartX     int  `json:"start_x"`
+			StartY     int  `json:"start_y"`
+			Horizontal bool `json:"horizontal"`
+		} `json:"ships"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, http.StatusBadRequest, "Неверный формат JSON")
+		return
+	}
+
+	if len(req.Ships) != 10 {
+		sendError(w, http.StatusBadRequest, "Должно быть ровно 10 кораблей")
+		return
+	}
+
+	ships := make([]Ship, len(req.Ships))
+	board := make([][]bool, 10)
+	for i := range board {
+		board[i] = make([]bool, 10)
+	}
+
+	for i, rs := range req.Ships {
+		if rs.ShipType < 1 || rs.ShipType > 4 {
+			sendError(w, http.StatusBadRequest, "Некорректный тип корабля")
+			return
+		}
+		if rs.StartX < 0 || rs.StartX > 9 || rs.StartY < 0 || rs.StartY > 9 {
+			sendError(w, http.StatusBadRequest, "Корабль за пределами поля")
+			return
+		}
+
+		for j := 0; j < rs.ShipType; j++ {
+			cx := rs.StartX
+			cy := rs.StartY
+			if rs.Horizontal {
+				cx += j
+			} else {
+				cy += j
+			}
+			if cx < 0 || cx > 9 || cy < 0 || cy > 9 {
+				sendError(w, http.StatusBadRequest, "Корабль за пределами поля")
+				return
+			}
+			if board[cy][cx] {
+				sendError(w, http.StatusBadRequest, "Корабли пересекаются")
+				return
+			}
+			board[cy][cx] = true
+		}
+
+		ships[i] = Ship{
+			ShipType:   rs.ShipType,
+			StartX:     rs.StartX,
+			StartY:     rs.StartY,
+			Horizontal: rs.Horizontal,
+		}
+	}
+
+	typeCount := map[int]int{4: 1, 3: 2, 2: 3, 1: 4}
+	for _, s := range ships {
+		typeCount[s.ShipType]--
+	}
+	for _, c := range typeCount {
+		if c != 0 {
+			sendError(w, http.StatusBadRequest, "Неверный набор кораблей: нужно 1×4, 2×3, 3×2, 4×1")
+			return
+		}
+	}
+
+	ok := s.Games.PlaceShips(uuid.UUID(gameID), userID, ships)
+	if !ok {
+		sendError(w, http.StatusBadRequest, "Не удалось расставить корабли")
+		return
+	}
+
+	s.Games.CheckAndStart(uuid.UUID(gameID))
+	game, _ := s.Games.Get(uuid.UUID(gameID))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(game)
+}
+
+func (s *Server) MakeMove(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	var req struct {
+		X int `json:"x"`
+		Y int `json:"y"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, http.StatusBadRequest, "Неверный формат JSON")
+		return
+	}
+
+	if req.X < 0 || req.X > 9 || req.Y < 0 || req.Y > 9 {
+		sendError(w, http.StatusBadRequest, "Координаты вне поля (0-9)")
+		return
+	}
+
+	game, errMsg := s.Games.MakeMove(uuid.UUID(gameID), userID, req.X, req.Y)
+	if errMsg != "" {
+		sendError(w, http.StatusBadRequest, errMsg)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(game)
 }

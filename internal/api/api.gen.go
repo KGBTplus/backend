@@ -16,12 +16,157 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/go-chi/chi/v5"
+	"github.com/oapi-codegen/runtime"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 const (
 	BearerAuthScopes bearerAuthContextKey = "BearerAuth.Scopes"
 )
+
+// Defines values for ListGames200JSONResponseBodyStatus.
+const (
+	ListGames200JSONResponseBodyStatusFinished     ListGames200JSONResponseBodyStatus = "finished"
+	ListGames200JSONResponseBodyStatusPlacingShips ListGames200JSONResponseBodyStatus = "placing_ships"
+	ListGames200JSONResponseBodyStatusPlaying      ListGames200JSONResponseBodyStatus = "playing"
+	ListGames200JSONResponseBodyStatusWaiting      ListGames200JSONResponseBodyStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the ListGames200JSONResponseBodyStatus enum.
+func (e ListGames200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case ListGames200JSONResponseBodyStatusFinished:
+		return true
+	case ListGames200JSONResponseBodyStatusPlacingShips:
+		return true
+	case ListGames200JSONResponseBodyStatusPlaying:
+		return true
+	case ListGames200JSONResponseBodyStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateGame201JSONResponseBodyStatus.
+const (
+	CreateGame201JSONResponseBodyStatusFinished     CreateGame201JSONResponseBodyStatus = "finished"
+	CreateGame201JSONResponseBodyStatusPlacingShips CreateGame201JSONResponseBodyStatus = "placing_ships"
+	CreateGame201JSONResponseBodyStatusPlaying      CreateGame201JSONResponseBodyStatus = "playing"
+	CreateGame201JSONResponseBodyStatusWaiting      CreateGame201JSONResponseBodyStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the CreateGame201JSONResponseBodyStatus enum.
+func (e CreateGame201JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case CreateGame201JSONResponseBodyStatusFinished:
+		return true
+	case CreateGame201JSONResponseBodyStatusPlacingShips:
+		return true
+	case CreateGame201JSONResponseBodyStatusPlaying:
+		return true
+	case CreateGame201JSONResponseBodyStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetGame200JSONResponseBodyStatus.
+const (
+	GetGame200JSONResponseBodyStatusFinished     GetGame200JSONResponseBodyStatus = "finished"
+	GetGame200JSONResponseBodyStatusPlacingShips GetGame200JSONResponseBodyStatus = "placing_ships"
+	GetGame200JSONResponseBodyStatusPlaying      GetGame200JSONResponseBodyStatus = "playing"
+	GetGame200JSONResponseBodyStatusWaiting      GetGame200JSONResponseBodyStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the GetGame200JSONResponseBodyStatus enum.
+func (e GetGame200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case GetGame200JSONResponseBodyStatusFinished:
+		return true
+	case GetGame200JSONResponseBodyStatusPlacingShips:
+		return true
+	case GetGame200JSONResponseBodyStatusPlaying:
+		return true
+	case GetGame200JSONResponseBodyStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for JoinGame200JSONResponseBodyStatus.
+const (
+	JoinGame200JSONResponseBodyStatusFinished     JoinGame200JSONResponseBodyStatus = "finished"
+	JoinGame200JSONResponseBodyStatusPlacingShips JoinGame200JSONResponseBodyStatus = "placing_ships"
+	JoinGame200JSONResponseBodyStatusPlaying      JoinGame200JSONResponseBodyStatus = "playing"
+	JoinGame200JSONResponseBodyStatusWaiting      JoinGame200JSONResponseBodyStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the JoinGame200JSONResponseBodyStatus enum.
+func (e JoinGame200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case JoinGame200JSONResponseBodyStatusFinished:
+		return true
+	case JoinGame200JSONResponseBodyStatusPlacingShips:
+		return true
+	case JoinGame200JSONResponseBodyStatusPlaying:
+		return true
+	case JoinGame200JSONResponseBodyStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MakeMove200JSONResponseBodyStatus.
+const (
+	MakeMove200JSONResponseBodyStatusFinished     MakeMove200JSONResponseBodyStatus = "finished"
+	MakeMove200JSONResponseBodyStatusPlacingShips MakeMove200JSONResponseBodyStatus = "placing_ships"
+	MakeMove200JSONResponseBodyStatusPlaying      MakeMove200JSONResponseBodyStatus = "playing"
+	MakeMove200JSONResponseBodyStatusWaiting      MakeMove200JSONResponseBodyStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the MakeMove200JSONResponseBodyStatus enum.
+func (e MakeMove200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case MakeMove200JSONResponseBodyStatusFinished:
+		return true
+	case MakeMove200JSONResponseBodyStatusPlacingShips:
+		return true
+	case MakeMove200JSONResponseBodyStatusPlaying:
+		return true
+	case MakeMove200JSONResponseBodyStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PlaceShips200JSONResponseBodyStatus.
+const (
+	PlaceShips200JSONResponseBodyStatusFinished     PlaceShips200JSONResponseBodyStatus = "finished"
+	PlaceShips200JSONResponseBodyStatusPlacingShips PlaceShips200JSONResponseBodyStatus = "placing_ships"
+	PlaceShips200JSONResponseBodyStatusPlaying      PlaceShips200JSONResponseBodyStatus = "playing"
+	PlaceShips200JSONResponseBodyStatusWaiting      PlaceShips200JSONResponseBodyStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the PlaceShips200JSONResponseBodyStatus enum.
+func (e PlaceShips200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case PlaceShips200JSONResponseBodyStatusFinished:
+		return true
+	case PlaceShips200JSONResponseBodyStatusPlacingShips:
+		return true
+	case PlaceShips200JSONResponseBodyStatusPlaying:
+		return true
+	case PlaceShips200JSONResponseBodyStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
 
 // bearerAuthContextKey is the context key for BearerAuth security scheme
 type bearerAuthContextKey string
@@ -55,6 +200,40 @@ type RegisterJSONBody struct {
 	Username string `json:"username"`
 }
 
+// ListGames200JSONResponseBodyStatus defines parameters for ListGames.
+type ListGames200JSONResponseBodyStatus string
+
+// CreateGame201JSONResponseBodyStatus defines parameters for CreateGame.
+type CreateGame201JSONResponseBodyStatus string
+
+// GetGame200JSONResponseBodyStatus defines parameters for GetGame.
+type GetGame200JSONResponseBodyStatus string
+
+// JoinGame200JSONResponseBodyStatus defines parameters for JoinGame.
+type JoinGame200JSONResponseBodyStatus string
+
+// MakeMoveJSONBody defines parameters for MakeMove.
+type MakeMoveJSONBody struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+}
+
+// MakeMove200JSONResponseBodyStatus defines parameters for MakeMove.
+type MakeMove200JSONResponseBodyStatus string
+
+// PlaceShipsJSONBody defines parameters for PlaceShips.
+type PlaceShipsJSONBody struct {
+	Ships *[]struct {
+		Horizontal bool `json:"horizontal"`
+		ShipType   int  `json:"ship_type"`
+		StartX     int  `json:"start_x"`
+		StartY     int  `json:"start_y"`
+	} `json:"ships,omitempty"`
+}
+
+// PlaceShips200JSONResponseBodyStatus defines parameters for PlaceShips.
+type PlaceShips200JSONResponseBodyStatus string
+
 // Authenticate2FAJSONRequestBody defines body for Authenticate2FA for application/json ContentType.
 type Authenticate2FAJSONRequestBody Authenticate2FAJSONBody
 
@@ -66,6 +245,12 @@ type LoginJSONRequestBody LoginJSONBody
 
 // RegisterJSONRequestBody defines body for Register for application/json ContentType.
 type RegisterJSONRequestBody RegisterJSONBody
+
+// MakeMoveJSONRequestBody defines body for MakeMove for application/json ContentType.
+type MakeMoveJSONRequestBody MakeMoveJSONBody
+
+// PlaceShipsJSONRequestBody defines body for PlaceShips for application/json ContentType.
+type PlaceShipsJSONRequestBody PlaceShipsJSONBody
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -84,6 +269,27 @@ type ServerInterface interface {
 	// Регистрация нового пользователя
 	// (POST /auth/register)
 	Register(w http.ResponseWriter, r *http.Request)
+	// Список доступных игр
+	// (GET /games)
+	ListGames(w http.ResponseWriter, r *http.Request)
+	// Создать новую игру
+	// (POST /games)
+	CreateGame(w http.ResponseWriter, r *http.Request)
+	// Получить состояние игры
+	// (GET /games/{gameId})
+	GetGame(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID)
+	// Присоединиться к игре
+	// (POST /games/{gameId}/join)
+	JoinGame(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID)
+	// Сделать ход
+	// (POST /games/{gameId}/move)
+	MakeMove(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID)
+	// Расставить корабли
+	// (POST /games/{gameId}/ships)
+	PlaceShips(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID)
+	// Получить профиль текущего пользователя
+	// (GET /profile)
+	GetProfile(w http.ResponseWriter, r *http.Request)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -117,6 +323,48 @@ func (_ Unimplemented) Login(w http.ResponseWriter, r *http.Request) {
 // Регистрация нового пользователя
 // (POST /auth/register)
 func (_ Unimplemented) Register(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Список доступных игр
+// (GET /games)
+func (_ Unimplemented) ListGames(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Создать новую игру
+// (POST /games)
+func (_ Unimplemented) CreateGame(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Получить состояние игры
+// (GET /games/{gameId})
+func (_ Unimplemented) GetGame(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Присоединиться к игре
+// (POST /games/{gameId}/join)
+func (_ Unimplemented) JoinGame(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Сделать ход
+// (POST /games/{gameId}/move)
+func (_ Unimplemented) MakeMove(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Расставить корабли
+// (POST /games/{gameId}/ships)
+func (_ Unimplemented) PlaceShips(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Получить профиль текущего пользователя
+// (GET /profile)
+func (_ Unimplemented) GetProfile(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -202,6 +450,194 @@ func (siw *ServerInterfaceWrapper) Register(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Register(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListGames operation middleware
+func (siw *ServerInterfaceWrapper) ListGames(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListGames(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateGame operation middleware
+func (siw *ServerInterfaceWrapper) CreateGame(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateGame(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetGame operation middleware
+func (siw *ServerInterfaceWrapper) GetGame(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gameId" -------------
+	var gameId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gameId", chi.URLParam(r, "gameId"), &gameId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gameId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetGame(w, r, gameId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// JoinGame operation middleware
+func (siw *ServerInterfaceWrapper) JoinGame(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gameId" -------------
+	var gameId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gameId", chi.URLParam(r, "gameId"), &gameId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gameId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.JoinGame(w, r, gameId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MakeMove operation middleware
+func (siw *ServerInterfaceWrapper) MakeMove(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gameId" -------------
+	var gameId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gameId", chi.URLParam(r, "gameId"), &gameId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gameId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MakeMove(w, r, gameId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PlaceShips operation middleware
+func (siw *ServerInterfaceWrapper) PlaceShips(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gameId" -------------
+	var gameId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gameId", chi.URLParam(r, "gameId"), &gameId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gameId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PlaceShips(w, r, gameId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetProfile operation middleware
+func (siw *ServerInterfaceWrapper) GetProfile(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProfile(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -339,6 +775,27 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/register", wrapper.Register)
 	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/games", wrapper.ListGames)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/games", wrapper.CreateGame)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/games/{gameId}", wrapper.GetGame)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/games/{gameId}/join", wrapper.JoinGame)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/games/{gameId}/move", wrapper.MakeMove)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/games/{gameId}/ships", wrapper.PlaceShips)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/profile", wrapper.GetProfile)
+	})
 
 	return r
 }
@@ -348,25 +805,40 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"1FbdThtHFH6V0VyBtALj0Cj1HVwgpcpFVar2AqFqYw+wKfvTmXFahCzZ67SkAhWl6lWlJFX7AsuGLYsN",
-	"yyuc80bVmVmDMTYkLm3VK3t2fs7P953znV1eD/0oDESgFa/tciXqTenpndX6lvCF+bQsXCnkUlNv0eqp",
-	"Wa2E0nc1r/FPvvycO1yZ07xW7nKH652I1ltaR7zVajncCzZCuq89vU07q8Jly67W24ItffqYO/y5kMoL",
-	"A17jC3OVuQpvOTyMROBGHq/xB3OVuQfc4ZGrt4xT825Tb81XN1zzRwTaq7ta0E4UKk2/YSSkq70weNzg",
-	"Nb40dKq6ssQdLsU3TaH0ctjYoeP1MNAiMDfdKNqmg14YzD9T5NKujdA170t6WXs2OfWwYayW8SotvWCT",
-	"fNfCj77S4dciGLPdsuY9KRq8tjZ81rEvrl9mMHz6TNS1zeHVHS2bwnxQURgo60q1Uvkbgdzi6hhPGkLV",
-	"pRdpCxj8gR24gAxfwjkkeMggwS7GkME5xpDjC8ihBwn+ADkeOgxS3IdjSOCcEX1aDl+sLJDpkVdfQwYp",
-	"ZNiGc9yHUwY9KOCYQQ59yBnk2MEYX0GPYQfbUECPDSWSvFRN33flDr31lq5iXL53DDnGeMCqK0tXrzK4",
-	"gAL62MW9ctt413KGyKaEbkaTWbZK2wN63Rs0vlDK3RTTgvOrja/AGC6wDQmk0CdoGIHFhO9627diwOgK",
-	"xlBgG3I4gQJSws7e+fjmHUoqduFPuplCD/r4E+6RQUgsKmWL4bW1681lbb21fg2015DgHiQGC8MsApyQ",
-	"PoUedg16M9fjwkPIML7E9DLA2REcnwvpbexMBvILs/8vNIqRTvAfFb/Srm6qKQlmiiiBHpU6pJAbhAxF",
-	"CHAiSeWDixtfGLqdEfjTkfODiDa+O5QuYcdyyLSIMXEOOskQxbbDTS+YzK4nZvu+mBW5Sn0bysZYGWoq",
-	"IQPXfw/qXZ50rl78/8qQ5VSK3xsIZ+AIMjghlGYpK9VK9R/px3fL/t1B/I5tyOAIu9TJsIOHllvvJ5IZ",
-	"I/nCVxiXS6uzdjGqiT+X2YGUYcfKKWRwht0hJkux6Skt5GQyfzY4cV98top0M9JfSJ1JVki6jnD/skax",
-	"bVLWK4M+LTXN4RuDKXXw4QZcw7UzYu4NxuwR5a9g1YpJEJxBanwoIOUO993vnohgkxpKteJw3wsGy0fO",
-	"7YU4xtKitbTw8A5LCw+vWVp0pqhqp8zHdNU9joRvzeB0MOi/hkd9PCAyXg2GBYVWwIml5JAyTMsTKUM5",
-	"bZW9wZeQwxGNpcxIRh9ycoxmVMjZDBybLzRAGDhofMnn4QIS0/b7Zo69oPhIfAacc2jkuK5rw0o2O3Fm",
-	"mpzBDsOYVIe8uHIlswuSSqtN5cCFHezij5AZt1LbQ8joR2M1eDgJ2DFOW9eT0VbxG2Twrpy424NJnoIt",
-	"DFHfQTGYnkdDOKT0t/4KAAD//w==",
+	"5FrdbhvHFX6VxbQXNrC1KEYNEt7JBSw4SACjKtoLwyBG5Igcm/vT2VnbrEGApJI6hYwIKXpRBEgct+g9",
+	"RYs1TdrUK5x5o+LM7JK75K5I0TJrI1fi7s7P+fnOd86Z0RNS8Rzfc5krA1J6QoJKnTlU/5x9KEdvy3vU",
+	"YfjJF57PhOTMDBSMSlYtU4lPh55w8BepUsl+I7nDiE1k02ekRAIpuFsjLZtUQiGYK8syFG5qVhjyKrGJ",
+	"GzYa9KDBSEmKkGUswKtZ0xaGOd5DIySXzNE/fi3YISmRX23N9NuK9NvKUPkr7yHDhaKVqRC0ic9+gzaZ",
+	"2C6vKIcZXswZvlTboM79d1Jjv879LDUCSWWoF2Ru6JDSXfKIcom7apkr3K2VzeZGB/PlkLs8qLMquZch",
+	"6yPuukysp2nLJoL9OeSCVVEWPSVh6am8sUViB9tJEM6E8g7us4rUeMvx7AKY61yjOFrgwPMajLqXAJyR",
+	"dlVYBKH7QNt3XWA8xlkOfcwd9N7nNnG4a34XpqO5K1mNCRzevMzwfGcYXzwmuKCtTbaize8I75A3ss1e",
+	"9pmoMFfSGkuZ4rDhUTkznhs6B0aZOjectajmitZveEHAcpbQ+Cqjf7K/S0/SRrlGnbwFzICg7uUJGQZM",
+	"uBGhZgXRpe3xiLuZW2X5cbp5WpNokalpFgRJGSatZOQQe96XK0JDM9RibmGNRpr4VgzXx9lGb65goGW4",
+	"nufQuif4XzxX0sYmmQNJw7xNRPROIqK3swggkFTI8iVZw0xqXnJSOnSm9ljGKjPFZtLOREhZ247gEW22",
+	"6CsUg1VCwWVzH2FmMHOTUcHEbijr+HSgn27F9v7iT3/A9fRoFFt/nTmgLqVPWrgwdw89rR+XSGhkn1Hr",
+	"JpWywazdO7eJTR4yEXDPJSWyfaNwo4A28XzmUp+TEvnkRuHGJ6g5lXUt1BYNZX2reEj1D+ZKXqHSEKUX",
+	"aIwj7Knknnu7SkpkNzGqeGuXGKuyQN70qk1TvrmSuXom9f0GDuSeu3U/8NxZoZcRcF41m5Ekc/yy9B4w",
+	"N+PznFMTY22zYoZvUnMwvekXge+5ESkXC4V3UOQCUTMkqbKgIrgvjcPg36oD5zBQ38Jb6KkTC3rqSHVh",
+	"AG9VF4bqaxjCCHrqrzBUJ7YFfXUMZ9CDtxbCp2WTncI2bj236o8wgD4MVBveqmN4bcEIJnBmwRDGMLRg",
+	"qDqqq76HkaU6qg0TGFkJQ2owh45DRRPXeo5TVTda7wyGqqueWcVbu7NVLTiHCYzVkXoafdbStewE2AIm",
+	"Qz8fZfv4OYbXlbnGYUEQZbV1nPOD0W+iunCu2tCDPozRNRY6y2IO5Y0LfWDhFNWFiWrDEF7BBProOzPn",
+	"88U5aFR1BP/FmX0YwVh9p57ihtBLUQwp3U2Ty917rXspp/0IPfUUetoXGlnocPT0axipI+29a2m91AkM",
+	"VHfq06mC1+f8+JAJftjMd+Qf9fcNEMUcE/yfgn/W1qwBMB1EPRhhqEMfhtpDGiLocARJ4dLBrb7WcHuD",
+	"zl8PnJcCWjY7RCKpjsGQpogMPWMmSUCs4dW4m4+uL/Xnq0KWT4PgkSeqmWnogqp5DnqJEne64sebhgym",
+	"+uob7cJrcAoDeIVeuo5WKRaK74WPl6f95Ur8S7VhAKfqCJlMddSJwdZqSXJgYfpS36tu9GjyrHmYz4l/",
+	"j6wDfUt1TDqFAbxRRwkkC1bjgWQiH8y/j0dcFZ5NRlrU9B+YnTGtYOo6VcfTGFVtbbJRpPTrKKfZs64g",
+	"frHYRCRiZ267n1TX+gztN7GKBW0geAN9LcME+sTG2v5L5taQUIoFXd7Hj5/ZFwdixk47ZqftT5fstP1p",
+	"aqcde42otiN7rBfdWSB8rgunZzH/ahyN1TME46wwnKBqE3hlIJnIDOviRAhPrBtlP6lvYQinWJZaOmWM",
+	"YYiCYY0KQ+sanOk3WEBod2D5MtyCc+hp2h/rOvYc9cPkE2POxpIjndeSmex6bs2Ub8GOpbqYdVCKmSgD",
+	"84Cp0uSmqOBSHXWk/gYDLVbfcAhu+tvMHJw0gupooY3ovXmq+BkG8DKquNtxJY/KTjRQX8Ikrp7nVTgx",
+	"ZDI9+amxrITIA7kXnai8UzJZ97xXn9QvnFVk4OYFnKMZdLcBQ3ip2hsoT1KbnsFEu+EIzhFi6puEHNkM",
+	"/Tt91rtnWCArmlc271pWzbDiP1FgA7opIcTF4nu2ZLRf3FNMMErUd5EN49Sn0br1BP/crrZyYbvH5F7M",
+	"rYI6TDIRaBmw+NNnFcQmhvSJWYvM86udsO6SQyxU5Z2C46q898IgECbqBFkRfWOsd7x+H7mTMSdGCfKd",
+	"7uXgNZyt1Ug+n2vsEXe5KiwCYOu+d1E5/4XH3V8iDp6jI3UID7Bn0oYcY8W6QRjk5dMpw0QHEa+gZxKU",
+	"Tp5rIGhRV0SSrs+nqSAqsefR48Q3Z5no+Yo+YPpubZPouYo6fYN3aeaKYRPd6FXFxn+izkodJ2F38XFI",
+	"VitjWrQPlVdf6HnjKJ3GsmaEwPRCPjsG7jRohe3H9+YfVRQs/qvB3I3bktuuD/xiai4QL3HbtPwqsPUR",
+	"xfMPOrx6cGqOJ9v6MLqjW7PoOD2uflaMbn1PklrHNFOjdevg9x/tP6eUHibOX2LDmNj3Z/+1kFc2x//Y",
+	"sFnvxrvmFTMTfVOFbXd+M7uRs+hkraovN2aSaUlGpstf1ne3Wv8LAAD//w==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
