@@ -3,7 +3,7 @@
 ## Quick start
 
 ```bash
-cp .env.example .env   # настроить SMTP (необязательно)
+cp .env.example .env   # настроить SMTP, DB, JWT (необязательно)
 docker compose up -d   # PostgreSQL on :5432, Adminer on :8081
 go run main.go         # starts on :8080, runs goose migrations on startup
 ```
@@ -45,8 +45,8 @@ Swagger UI at `/swagger/`.
 
 ## Constraints
 
-- DB connstring hardcoded in `main.go` — `postgres://user:password@localhost:5432/game?sslmode=disable`
-- JWT secret hardcoded in `server.go` — `my_secret_key` (TODO: move to env)
+- DB connstring from `DATABASE_URL` env/.env (default: `postgres://user:password@localhost:5432/game?sslmode=disable`)
+- JWT secret from `JWT_SECRET` env/.env (default: `my_secret_key`)
 - oapi-codegen uses `chi-server: true` + `embedded-spec: true` + `strict-server: false` (handlers passed directly, not via ServerInterface)
 - goose migrations run automatically on every startup via `runMigrations()`
 - All handlers use Russian-language error messages

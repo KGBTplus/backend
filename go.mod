@@ -7,9 +7,9 @@ require (
 	github.com/go-chi/chi/v5 v5.3.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
+	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.12.3
 	github.com/oapi-codegen/runtime v1.4.1
-	github.com/pquerna/otp v1.5.0
 	github.com/swaggo/http-swagger/v2 v2.0.2
 	golang.org/x/crypto v0.53.0
 )

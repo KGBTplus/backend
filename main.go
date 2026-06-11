@@ -39,7 +39,7 @@ func main() {
 	godotenv.Load()
 
 	// 1. Подключение к БД
-	connStr := "postgres://user:password@localhost:5432/game?sslmode=disable"
+	connStr := getEnv("DATABASE_URL", "postgres://user:password@localhost:5432/game?sslmode=disable")
 	dbConn, err := sql.Open("postgres", connStr)
 	if err != nil {
 		log.Fatalf("Ошибка подключения к БД: %v", err)
@@ -59,7 +59,8 @@ func main() {
 	}
 
 	// 3. Инициализация сервера
-	srv := api.NewServer(queries, smtpCfg)
+	jwtSecret := getEnv("JWT_SECRET", "my_secret_key")
+	srv := api.NewServer(queries, smtpCfg, jwtSecret)
 
 	// 4. Настройка роутера
 	r := chi.NewRouter()
