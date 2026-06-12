@@ -1,6 +1,6 @@
 post:
-  operationId: makeMove
-  summary: Сделать ход (выстрел)
+  operationId: confirmShips
+  summary: Подтвердить готовность (расстановка завершена)
   security:
     - BearerAuth: []
   parameters:
@@ -10,21 +10,23 @@ post:
       schema:
         type: string
         format: uuid
-  requestBody:
-    required: true
-    content:
-      application/json:
-        schema:
-          $ref: ../components/schemas/MoveRequest.yaml
   responses:
     '200':
-      description: Результат хода
+      description: Готовность подтверждена
       content:
         application/json:
           schema:
-            $ref: ../components/schemas/MoveResponse.yaml
+            type: object
+            properties:
+              status:
+                type: string
+                enum:
+                  - waiting_for_opponent
+                  - playing
+              message:
+                type: string
     '400':
-      description: Некорректные координаты или не ваш ход
+      description: Корабли ещё не расставлены
       content:
         application/json:
           schema:

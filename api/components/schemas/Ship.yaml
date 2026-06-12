@@ -1,0 +1,48 @@
+type: object
+properties:
+  id:
+    type: string
+    format: uuid
+  player_id:
+    type: string
+    format: uuid
+  ship_type:
+    type: integer
+    minimum: 1
+    maximum: 4
+  start_x:
+    type: integer
+    minimum: 0
+    maximum: 9
+  start_y:
+    type: integer
+    minimum: 0
+    maximum: 9
+  horizontal:
+    type: boolean
+  cells:
+    type: array
+    items:
+      type: object
+      properties:
+        x:
+          type: integer
+        y:
+          type: integer
+        hit:
+          type: boolean
+      required:
+        - x
+        - y
+        - hit
+  sunk:
+    type: boolean
+required:
+  - id
+  - player_id
+  - ship_type
+  - start_x
+  - start_y
+  - horizontal
+  - cells
+  - sunk

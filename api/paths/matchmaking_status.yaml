@@ -1,0 +1,14 @@
+get:
+  operationId: getMatchmakingStatus
+  summary: Проверить статус поиска (polling)
+  security:
+    - BearerAuth: []
+  responses:
+    '200':
+      description: Статус поиска
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/MatchmakingStatus.yaml
+    '401':
+      description: Не авторизован

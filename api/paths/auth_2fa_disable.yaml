@@ -1,0 +1,16 @@
+post:
+  operationId: disable2FA
+  summary: Отключить 2FA
+  security:
+    - BearerAuth: []
+  responses:
+    '200':
+      description: 2FA отключена
+    '401':
+      description: Не авторизован
+    '409':
+      description: 2FA не была включена
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml

@@ -1,0 +1,43 @@
+type: object
+properties:
+  game_id:
+    type: string
+    format: uuid
+  opponent_username:
+    type: string
+  result:
+    type: string
+    enum:
+      - win
+      - loss
+      - draw
+  win_reason:
+    type: string
+    enum:
+      - all_ships_sunk
+      - forfeit
+      - timeout
+    nullable: true
+  my_ships_sunk:
+    type: integer
+  opponent_ships_sunk:
+    type: integer
+  my_hits:
+    type: integer
+  my_misses:
+    type: integer
+  played_at:
+    type: string
+    format: date-time
+  duration_seconds:
+    type: integer
+    nullable: true
+required:
+  - game_id
+  - opponent_username
+  - result
+  - my_ships_sunk
+  - opponent_ships_sunk
+  - my_hits
+  - my_misses
+  - played_at

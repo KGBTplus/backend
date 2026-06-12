@@ -1,0 +1,16 @@
+get:
+  operationId: getActiveGames
+  summary: Список активных игр текущего игрока (для reconnect)
+  security:
+    - BearerAuth: []
+  responses:
+    '200':
+      description: Активные игры
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: ../components/schemas/GameState.yaml
+    '401':
+      description: Не авторизован

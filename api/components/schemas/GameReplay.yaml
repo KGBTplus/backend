@@ -1,0 +1,25 @@
+type: object
+properties:
+  game:
+    $ref: ./GameResult.yaml
+  player1_ships:
+    type: array
+    items:
+      $ref: ./Ship.yaml
+  player2_ships:
+    type: array
+    items:
+      $ref: ./Ship.yaml
+  moves:
+    type: array
+    items:
+      $ref: ./Move.yaml
+  board_size:
+    type: integer
+    example: 10
+required:
+  - game
+  - player1_ships
+  - player2_ships
+  - moves
+  - board_size

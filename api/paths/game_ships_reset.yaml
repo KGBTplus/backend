@@ -1,6 +1,6 @@
 post:
-  operationId: makeMove
-  summary: Сделать ход (выстрел)
+  operationId: resetShips
+  summary: Сбросить расстановку и готовность (вернуться к редактированию)
   security:
     - BearerAuth: []
   parameters:
@@ -10,25 +10,9 @@ post:
       schema:
         type: string
         format: uuid
-  requestBody:
-    required: true
-    content:
-      application/json:
-        schema:
-          $ref: ../components/schemas/MoveRequest.yaml
   responses:
     '200':
-      description: Результат хода
-      content:
-        application/json:
-          schema:
-            $ref: ../components/schemas/MoveResponse.yaml
-    '400':
-      description: Некорректные координаты или не ваш ход
-      content:
-        application/json:
-          schema:
-            $ref: ../components/schemas/Error.yaml
+      description: Расстановка сброшена, можно редактировать заново
     '401':
       description: Не авторизован
     '403':
@@ -39,6 +23,12 @@ post:
             $ref: ../components/schemas/Error.yaml
     '404':
       description: Игра не найдена
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml
+    '409':
+      description: Игра уже началась, нельзя изменить расстановку
       content:
         application/json:
           schema:

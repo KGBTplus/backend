@@ -1,0 +1,41 @@
+type: object
+properties:
+  id:
+    type: string
+    format: uuid
+  username:
+    type: string
+  email:
+    type: string
+    format: email
+  created_at:
+    type: string
+    format: date-time
+  total_games:
+    type: integer
+  wins:
+    type: integer
+  losses:
+    type: integer
+  win_percentage:
+    type: number
+    format: float
+  hit_percentage:
+    type: number
+    format: float
+  ships_sunk:
+    type: integer
+  total_shots:
+    type: integer
+  hits:
+    type: integer
+required:
+  - id
+  - username
+  - email
+  - created_at
+  - total_games
+  - wins
+  - losses
+  - win_percentage
+  - hit_percentage

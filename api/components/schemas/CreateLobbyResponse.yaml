@@ -1,0 +1,13 @@
+type: object
+properties:
+  lobby_id:
+    type: string
+    format: uuid
+  invite_code:
+    type: string
+  invite_link:
+    type: string
+required:
+  - lobby_id
+  - invite_code
+  - invite_link

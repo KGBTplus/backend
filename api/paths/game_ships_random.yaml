@@ -1,6 +1,6 @@
 post:
-  operationId: makeMove
-  summary: Сделать ход (выстрел)
+  operationId: placeShipsRandom
+  summary: Расставить корабли случайным образом
   security:
     - BearerAuth: []
   parameters:
@@ -10,21 +10,22 @@ post:
       schema:
         type: string
         format: uuid
-  requestBody:
-    required: true
-    content:
-      application/json:
-        schema:
-          $ref: ../components/schemas/MoveRequest.yaml
   responses:
     '200':
-      description: Результат хода
+      description: Корабли расставлены случайно
       content:
         application/json:
           schema:
-            $ref: ../components/schemas/MoveResponse.yaml
+            type: object
+            properties:
+              ships:
+                type: array
+                items:
+                  $ref: ../components/schemas/Ship.yaml
+              message:
+                type: string
     '400':
-      description: Некорректные координаты или не ваш ход
+      description: Игра не в фазе расстановки
       content:
         application/json:
           schema:

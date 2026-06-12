@@ -1,0 +1,32 @@
+get:
+  operationId: getLeaderboard
+  summary: Получить таблицу лидеров
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: sort_by
+      in: query
+      description: Поле для сортировки
+      schema:
+        type: string
+        enum:
+          - wins
+          - win_rate
+          - hit_rate
+          - total_games
+        default: wins
+    - name: limit
+      in: query
+      description: Количество записей в топе
+      schema:
+        type: integer
+        default: 50
+  responses:
+    '200':
+      description: Таблица лидеров
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/LeaderboardResponse.yaml
+    '401':
+      description: Не авторизован
