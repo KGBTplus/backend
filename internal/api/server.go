@@ -435,6 +435,22 @@ func (s *Server) Verify2FA(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "2FA activated"})
 }
 
+// ---------- 2FA отключение ----------
+
+func (s *Server) Disable2FA(w http.ResponseWriter, r *http.Request) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	// TODO: DB call to disable 2FA
+	_ = userID
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "2FA disabled"})
+}
+
 // ---------- Профиль ----------
 
 func (s *Server) GetProfile(w http.ResponseWriter, r *http.Request) {
@@ -466,17 +482,72 @@ func (s *Server) GetProfile(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":              user.ID,
-		"username":        user.Username,
-		"total_games":     profile.TotalGames,
-		"wins":            profile.Wins,
-		"losses":          profile.Losses,
-		"win_percentage":  winPct,
-		"ships_sunk":      profile.ShipsSunk,
-		"total_shots":     profile.TotalShots,
-		"hits":            profile.Hits,
-		"hit_percentage":  hitPct,
+		"id":             user.ID,
+		"username":       user.Username,
+		"total_games":    profile.TotalGames,
+		"wins":           profile.Wins,
+		"losses":         profile.Losses,
+		"win_percentage": winPct,
+		"ships_sunk":     profile.ShipsSunk,
+		"total_shots":    profile.TotalShots,
+		"hits":           profile.Hits,
+		"hit_percentage": hitPct,
 	})
+}
+
+func (s *Server) UpdateProfile(w http.ResponseWriter, r *http.Request) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, http.StatusBadRequest, "Неверный формат JSON")
+		return
+	}
+
+	if len(req.Username) < minUsernameLen || len(req.Username) > maxUsernameLen {
+		sendError(w, http.StatusBadRequest, "Имя пользователя должно содержать от 4 до 16 символов")
+		return
+	}
+
+	// TODO: DB call UpdateUsername
+	_ = userID
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"username": req.Username})
+}
+
+func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, http.StatusBadRequest, "Неверный формат JSON")
+		return
+	}
+
+	if len(req.NewPassword) < minPasswordLen || len(req.NewPassword) > maxPasswordLen {
+		sendError(w, http.StatusBadRequest, "Пароль должен содержать от 8 до 20 символов")
+		return
+	}
+
+	// TODO: verify old password and update in DB
+	_ = userID
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "password changed"})
 }
 
 // ---------- Игры ----------
@@ -507,7 +578,49 @@ func (s *Server) ListGames(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(games)
 }
 
-func (s *Server) GetGame(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
+func (s *Server) GetActiveGames(w http.ResponseWriter, r *http.Request) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	var active []*GameRoom
+	for _, g := range s.Games.All() {
+		if (g.Player1ID == userID || (g.Player2ID != nil && *g.Player2ID == userID)) &&
+			(g.Status == "placing_ships" || g.Status == "playing") {
+			active = append(active, g)
+		}
+	}
+	if active == nil {
+		active = []*GameRoom{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(active)
+}
+
+func (s *Server) GetGameHistory(w http.ResponseWriter, r *http.Request, params GetGameHistoryParams) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	var finished []*GameRoom
+	for _, g := range s.Games.All() {
+		if (g.Player1ID == userID || (g.Player2ID != nil && *g.Player2ID == userID)) &&
+			g.Status == "finished" {
+			finished = append(finished, g)
+		}
+	}
+	if finished == nil {
+		finished = []*GameRoom{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(finished)
+}
+
+func (s *Server) GetGameState(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
 	_, err := s.getUserIDFromToken(r)
 	if err != nil {
 		sendError(w, http.StatusUnauthorized, "Не авторизован")
@@ -524,22 +637,165 @@ func (s *Server) GetGame(w http.ResponseWriter, r *http.Request, gameID openapi_
 	json.NewEncoder(w).Encode(game)
 }
 
-func (s *Server) JoinGame(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
+func (s *Server) ForfeitGame(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
 	userID, err := s.getUserIDFromToken(r)
 	if err != nil {
 		sendError(w, http.StatusUnauthorized, "Не авторизован")
 		return
 	}
 
-	ok := s.Games.Join(uuid.UUID(gameID), userID)
+	game, ok := s.Games.Get(uuid.UUID(gameID))
 	if !ok {
-		sendError(w, http.StatusConflict, "Не удалось присоединиться к игре")
+		sendError(w, http.StatusNotFound, "Игра не найдена")
+		return
+	}
+	if game.Status != "playing" {
+		sendError(w, http.StatusBadRequest, "Игра не в статусе playing")
+		return
+	}
+	if game.Player1ID != userID && (game.Player2ID == nil || *game.Player2ID != userID) {
+		sendError(w, http.StatusForbidden, "Вы не участник этой игры")
 		return
 	}
 
-	game, _ := s.Games.Get(gameID)
+	var winnerID uuid.UUID
+	if userID == game.Player1ID {
+		winnerID = *game.Player2ID
+	} else {
+		winnerID = game.Player1ID
+	}
+	game.Status = "finished"
+	game.WinnerID = &winnerID
+	game.CurrentTurn = nil
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(game)
+}
+
+func (s *Server) MakeMove(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	var req struct {
+		X int `json:"x"`
+		Y int `json:"y"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, http.StatusBadRequest, "Неверный формат JSON")
+		return
+	}
+
+	if req.X < 0 || req.X > 9 || req.Y < 0 || req.Y > 9 {
+		sendError(w, http.StatusBadRequest, "Координаты вне поля (0-9)")
+		return
+	}
+
+	game, errMsg := s.Games.MakeMove(uuid.UUID(gameID), userID, req.X, req.Y)
+	if errMsg != "" {
+		sendError(w, http.StatusBadRequest, errMsg)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(game)
+}
+
+func (s *Server) GetGameResult(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	game, ok := s.Games.Get(uuid.UUID(gameID))
+	if !ok {
+		sendError(w, http.StatusNotFound, "Игра не найдена")
+		return
+	}
+	if game.Status != "finished" {
+		sendError(w, http.StatusBadRequest, "Игра ещё не завершена")
+		return
+	}
+	if game.Player1ID != userID && (game.Player2ID == nil || *game.Player2ID != userID) {
+		sendError(w, http.StatusForbidden, "Вы не участник этой игры")
+		return
+	}
+
+	var winnerID *uuid.UUID
+	if game.WinnerID != nil {
+		wid := *game.WinnerID
+		winnerID = &wid
+	}
+
+	var player2ID *uuid.UUID
+	if game.Player2ID != nil {
+		pid := *game.Player2ID
+		player2ID = &pid
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"game_id":     game.ID,
+		"player1_id":  game.Player1ID,
+		"player2_id":  player2ID,
+		"winner_id":   winnerID,
+		"win_reason":  "surrender",
+		"player1_mmr": 100,
+		"player2_mmr": 100,
+		"mmr_change":  0,
+	})
+}
+
+func (s *Server) GetGameReplay(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	game, ok := s.Games.Get(uuid.UUID(gameID))
+	if !ok {
+		sendError(w, http.StatusNotFound, "Игра не найдена")
+		return
+	}
+	if game.Player1ID != userID && (game.Player2ID == nil || *game.Player2ID != userID) {
+		sendError(w, http.StatusForbidden, "Вы не участник этой игры")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"game_id":     game.ID,
+		"player1_id":  game.Player1ID,
+		"player2_id":  game.Player2ID,
+		"initial_board": map[string]interface{}{
+			"player1_ships": s.Games.PlayerShips(game, game.Player1ID),
+			"player2_ships": nil,
+		},
+		"moves":  game.Moves,
+		"status": game.Status,
+	})
+}
+
+func (s *Server) RequestRematch(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
+	_, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	_, ok := s.Games.Get(uuid.UUID(gameID))
+	if !ok {
+		sendError(w, http.StatusNotFound, "Игра не найдена")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{"status": "rematch_requested"})
 }
 
 func (s *Server) PlaceShips(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
@@ -633,7 +889,398 @@ func (s *Server) PlaceShips(w http.ResponseWriter, r *http.Request, gameID opena
 	json.NewEncoder(w).Encode(game)
 }
 
-func (s *Server) MakeMove(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
+func (s *Server) ConfirmShips(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	game, ok := s.Games.Get(uuid.UUID(gameID))
+	if !ok {
+		sendError(w, http.StatusNotFound, "Игра не найдена")
+		return
+	}
+	if game.Player1ID != userID && (game.Player2ID == nil || *game.Player2ID != userID) {
+		sendError(w, http.StatusForbidden, "Вы не участник этой игры")
+		return
+	}
+
+	shipCount := 0
+	for _, s := range game.Ships {
+		if s.PlayerID == userID {
+			shipCount++
+		}
+	}
+	if shipCount < 10 {
+		sendError(w, http.StatusBadRequest, "Расставьте все 10 кораблей")
+		return
+	}
+
+	s.Games.CheckAndStart(uuid.UUID(gameID))
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(game)
+}
+
+func (s *Server) PlaceShipsRandom(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	game, ok := s.Games.Get(uuid.UUID(gameID))
+	if !ok {
+		sendError(w, http.StatusNotFound, "Игра не найдена")
+		return
+	}
+	if game.Player1ID != userID && (game.Player2ID == nil || *game.Player2ID != userID) {
+		sendError(w, http.StatusForbidden, "Вы не участник этой игры")
+		return
+	}
+
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	shipDefs := map[int]int{4: 1, 3: 2, 2: 3, 1: 4}
+	var randomShips []Ship
+
+	for size, count := range shipDefs {
+		for k := 0; k < count; k++ {
+			for attempts := 0; attempts < 100; attempts++ {
+				horizontal := rng.Intn(2) == 0
+				startX := rng.Intn(10)
+				startY := rng.Intn(10)
+				if horizontal && startX+size > 10 {
+					continue
+				}
+				if !horizontal && startY+size > 10 {
+					continue
+				}
+
+				cells := make([][2]int, size)
+				for j := 0; j < size; j++ {
+					x := startX
+					y := startY
+					if horizontal {
+						x += j
+					} else {
+						y += j
+					}
+					cells[j] = [2]int{x, y}
+				}
+
+				conflict := false
+				for _, existing := range randomShips {
+					for _, c := range cells {
+						for ex := existing.StartX - 1; ex <= existing.StartX+existing.ShipType; ex++ {
+							for ey := existing.StartY - 1; ey <= existing.StartY+1; ey++ {
+								if existing.Horizontal {
+									if ex >= 0 && ex < 10 && ey >= 0 && ey < 10 && c[0] == ex && c[1] == ey {
+										conflict = true
+									}
+								} else {
+									if ex >= 0 && ex < 10 && ey >= 0 && ey < 10 && c[0] == ex && c[1] == ey {
+										conflict = true
+									}
+								}
+							}
+						}
+					}
+				}
+				if !conflict {
+					randomShips = append(randomShips, Ship{
+						ShipType:   size,
+						StartX:     startX,
+						StartY:     startY,
+						Horizontal: horizontal,
+					})
+					break
+				}
+			}
+		}
+	}
+
+	if len(randomShips) != 10 {
+		randomShips = generateSimpleShips(rng)
+	}
+
+	ok = s.Games.PlaceShips(uuid.UUID(gameID), userID, randomShips)
+	if !ok {
+		sendError(w, http.StatusBadRequest, "Не удалось расставить корабли")
+		return
+	}
+
+	s.Games.CheckAndStart(uuid.UUID(gameID))
+	game, _ = s.Games.Get(uuid.UUID(gameID))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(game)
+}
+
+func (s *Server) ResetShips(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	game, ok := s.Games.Get(uuid.UUID(gameID))
+	if !ok {
+		sendError(w, http.StatusNotFound, "Игра не найдена")
+		return
+	}
+	if game.Player1ID != userID && (game.Player2ID == nil || *game.Player2ID != userID) {
+		sendError(w, http.StatusForbidden, "Вы не участник этой игры")
+		return
+	}
+
+	var kept []Ship
+	for _, s := range game.Ships {
+		if s.PlayerID != userID {
+			kept = append(kept, s)
+		}
+	}
+	game.Ships = kept
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(game)
+}
+
+// ---------- Лидерборд ----------
+
+func (s *Server) GetLeaderboard(w http.ResponseWriter, r *http.Request, params GetLeaderboardParams) {
+	_, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	// TODO: implement DB query
+	_ = params
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"top":     []interface{}{},
+		"my_rank": nil,
+	})
+}
+
+// ---------- Лобби (in-memory) ----------
+
+type lobby struct {
+	ID          uuid.UUID `json:"id"`
+	CreatorID   uuid.UUID `json:"creator_id"`
+	Status      string    `json:"status"`
+	InviteCode  string    `json:"invite_code"`
+	Players     []uuid.UUID `json:"players"`
+	MaxPlayers  int       `json:"max_players"`
+}
+
+type lobbyStore struct {
+	mu     sync.RWMutex
+	items  map[uuid.UUID]*lobby
+}
+
+var globalLobbyStore = &lobbyStore{items: make(map[uuid.UUID]*lobby)}
+
+func genInviteCode() string {
+	const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	code := make([]byte, 6)
+	for i := range code {
+		code[i] = chars[rand.Intn(len(chars))]
+	}
+	return string(code)
+}
+
+func (s *Server) ListLobbies(w http.ResponseWriter, r *http.Request, params ListLobbiesParams) {
+	_, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	globalLobbyStore.mu.RLock()
+	var result []*lobby
+	for _, l := range globalLobbyStore.items {
+		if params.Status != nil && l.Status != string(*params.Status) {
+			continue
+		}
+		result = append(result, l)
+	}
+	globalLobbyStore.mu.RUnlock()
+	if result == nil {
+		result = []*lobby{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *Server) CreateLobby(w http.ResponseWriter, r *http.Request) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	l := &lobby{
+		ID:         uuid.New(),
+		CreatorID:  userID,
+		Status:     "waiting",
+		InviteCode: genInviteCode(),
+		Players:    []uuid.UUID{userID},
+		MaxPlayers: 2,
+	}
+	globalLobbyStore.mu.Lock()
+	globalLobbyStore.items[l.ID] = l
+	globalLobbyStore.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(l)
+}
+
+func (s *Server) GetLobby(w http.ResponseWriter, r *http.Request, lobbyID openapi_types.UUID) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	globalLobbyStore.mu.RLock()
+	l, ok := globalLobbyStore.items[uuid.UUID(lobbyID)]
+	globalLobbyStore.mu.RUnlock()
+
+	if !ok {
+		sendError(w, http.StatusNotFound, "Лобби не найдено")
+		return
+	}
+
+	result := map[string]interface{}{
+		"id":         l.ID,
+		"creator_id": l.CreatorID,
+		"status":     l.Status,
+		"players":    l.Players,
+		"max_players": l.MaxPlayers,
+	}
+	if l.CreatorID == userID {
+		result["invite_code"] = l.InviteCode
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *Server) JoinLobby(w http.ResponseWriter, r *http.Request, lobbyID openapi_types.UUID) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	globalLobbyStore.mu.Lock()
+	l, ok := globalLobbyStore.items[uuid.UUID(lobbyID)]
+	if !ok {
+		globalLobbyStore.mu.Unlock()
+		sendError(w, http.StatusNotFound, "Лобби не найдено")
+		return
+	}
+	if l.Status != "waiting" {
+		globalLobbyStore.mu.Unlock()
+		sendError(w, http.StatusConflict, "Лобби уже заполнено")
+		return
+	}
+	for _, p := range l.Players {
+		if p == userID {
+			globalLobbyStore.mu.Unlock()
+			sendError(w, http.StatusConflict, "Вы уже в лобби")
+			return
+		}
+	}
+	if len(l.Players) >= l.MaxPlayers {
+		globalLobbyStore.mu.Unlock()
+		sendError(w, http.StatusConflict, "Лобби заполнено")
+		return
+	}
+	l.Players = append(l.Players, userID)
+	if len(l.Players) >= l.MaxPlayers {
+		l.Status = "full"
+	}
+	globalLobbyStore.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(l)
+}
+
+func (s *Server) LeaveLobby(w http.ResponseWriter, r *http.Request, lobbyID openapi_types.UUID) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	globalLobbyStore.mu.Lock()
+	l, ok := globalLobbyStore.items[uuid.UUID(lobbyID)]
+	if !ok {
+		globalLobbyStore.mu.Unlock()
+		sendError(w, http.StatusNotFound, "Лобби не найдено")
+		return
+	}
+	var newPlayers []uuid.UUID
+	found := false
+	for _, p := range l.Players {
+		if p == userID {
+			found = true
+		} else {
+			newPlayers = append(newPlayers, p)
+		}
+	}
+	if !found {
+		globalLobbyStore.mu.Unlock()
+		sendError(w, http.StatusBadRequest, "Вы не в этом лобби")
+		return
+	}
+	l.Players = newPlayers
+	if len(newPlayers) == 0 {
+		delete(globalLobbyStore.items, l.ID)
+		globalLobbyStore.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "lobby deleted"})
+		return
+	}
+	l.Status = "waiting"
+	globalLobbyStore.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(l)
+}
+
+func (s *Server) DeleteLobby(w http.ResponseWriter, r *http.Request, lobbyID openapi_types.UUID) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	globalLobbyStore.mu.Lock()
+	l, ok := globalLobbyStore.items[uuid.UUID(lobbyID)]
+	if !ok {
+		globalLobbyStore.mu.Unlock()
+		sendError(w, http.StatusNotFound, "Лобби не найдено")
+		return
+	}
+	if l.CreatorID != userID {
+		globalLobbyStore.mu.Unlock()
+		sendError(w, http.StatusForbidden, "Только создатель может удалить лобби")
+		return
+	}
+	delete(globalLobbyStore.items, l.ID)
+	globalLobbyStore.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "lobby deleted"})
+}
+
+func (s *Server) JoinLobbyByCode(w http.ResponseWriter, r *http.Request) {
 	userID, err := s.getUserIDFromToken(r)
 	if err != nil {
 		sendError(w, http.StatusUnauthorized, "Не авторизован")
@@ -641,25 +1288,216 @@ func (s *Server) MakeMove(w http.ResponseWriter, r *http.Request, gameID openapi
 	}
 
 	var req struct {
-		X int `json:"x"`
-		Y int `json:"y"`
+		Code string `json:"code"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendError(w, http.StatusBadRequest, "Неверный формат JSON")
 		return
 	}
 
-	if req.X < 0 || req.X > 9 || req.Y < 0 || req.Y > 9 {
-		sendError(w, http.StatusBadRequest, "Координаты вне поля (0-9)")
+	globalLobbyStore.mu.Lock()
+	var found *lobby
+	for _, l := range globalLobbyStore.items {
+		if l.InviteCode == req.Code {
+			found = l
+			break
+		}
+	}
+	if found == nil {
+		globalLobbyStore.mu.Unlock()
+		sendError(w, http.StatusNotFound, "Лобби с таким кодом не найдено")
 		return
 	}
-
-	game, errMsg := s.Games.MakeMove(uuid.UUID(gameID), userID, req.X, req.Y)
-	if errMsg != "" {
-		sendError(w, http.StatusBadRequest, errMsg)
+	if found.Status != "waiting" {
+		globalLobbyStore.mu.Unlock()
+		sendError(w, http.StatusConflict, "Лобби уже заполнено")
 		return
 	}
+	for _, p := range found.Players {
+		if p == userID {
+			globalLobbyStore.mu.Unlock()
+			sendError(w, http.StatusConflict, "Вы уже в лобби")
+			return
+		}
+	}
+	if len(found.Players) >= found.MaxPlayers {
+		globalLobbyStore.mu.Unlock()
+		sendError(w, http.StatusConflict, "Лобби заполнено")
+		return
+	}
+	found.Players = append(found.Players, userID)
+	if len(found.Players) >= found.MaxPlayers {
+		found.Status = "full"
+	}
+	globalLobbyStore.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(game)
+	json.NewEncoder(w).Encode(found)
+}
+
+// ---------- Матчмейкинг (in-memory) ----------
+
+type matchmakingEntry struct {
+	PlayerID  uuid.UUID
+	JoinedAt  time.Time
+}
+
+type matchmakingStore struct {
+	mu    sync.Mutex
+	queue []matchmakingEntry
+}
+
+var globalMMStore = &matchmakingStore{}
+
+func (s *Server) JoinMatchmaking(w http.ResponseWriter, r *http.Request) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	globalMMStore.mu.Lock()
+	for _, e := range globalMMStore.queue {
+		if e.PlayerID == userID {
+			globalMMStore.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"status": "already_in_queue"})
+			return
+		}
+	}
+	globalMMStore.queue = append(globalMMStore.queue, matchmakingEntry{
+		PlayerID: userID,
+		JoinedAt: time.Now(),
+	})
+	globalMMStore.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "searching"})
+}
+
+func (s *Server) GetMatchmakingStatus(w http.ResponseWriter, r *http.Request) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	globalMMStore.mu.Lock()
+	inQueue := false
+	for _, e := range globalMMStore.queue {
+		if e.PlayerID == userID {
+			inQueue = true
+			break
+		}
+	}
+	globalMMStore.mu.Unlock()
+
+	if inQueue {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "searching"})
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "not_found"})
+	}
+}
+
+func (s *Server) LeaveMatchmaking(w http.ResponseWriter, r *http.Request) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	globalMMStore.mu.Lock()
+	var newQueue []matchmakingEntry
+	for _, e := range globalMMStore.queue {
+		if e.PlayerID != userID {
+			newQueue = append(newQueue, e)
+		}
+	}
+	globalMMStore.queue = newQueue
+	globalMMStore.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "left_queue"})
+}
+
+// ---------- Вспомогательное для генерации кораблей ----------
+
+func generateSimpleShips(rng *rand.Rand) []Ship {
+	var result []Ship
+	shipDefs := map[int]int{4: 1, 3: 2, 2: 3, 1: 4}
+
+	// Простой fallback — корабли "лесенкой"
+	occupied := make([][]bool, 10)
+	for i := range occupied {
+		occupied[i] = make([]bool, 10)
+	}
+
+	for size, count := range shipDefs {
+		for k := 0; k < count; k++ {
+			placed := false
+			for y := 0; y < 10 && !placed; y++ {
+				for x := 0; x < 10 && !placed; x++ {
+					horizontal := rng.Intn(2) == 0
+					if horizontal && x+size > 10 {
+						continue
+					}
+					if !horizontal && y+size > 10 {
+						continue
+					}
+					ok := true
+					for j := 0; j < size; j++ {
+						cx, cy := x, y
+						if horizontal {
+							cx += j
+						} else {
+							cy += j
+						}
+						if occupied[cy][cx] {
+							ok = false
+							break
+						}
+						for dy := -1; dy <= 1 && ok; dy++ {
+							for dx := -1; dx <= 1 && ok; dx++ {
+								nx, ny := cx+dx, cy+dy
+								if nx >= 0 && nx < 10 && ny >= 0 && ny < 10 && occupied[ny][nx] {
+									if !(nx == cx && ny == cy) {
+										ok = false
+									}
+								}
+							}
+						}
+					}
+					if ok {
+						for j := 0; j < size; j++ {
+							cx, cy := x, y
+							if horizontal {
+								cx += j
+							} else {
+								cy += j
+							}
+							occupied[cy][cx] = true
+							for dy := -1; dy <= 1; dy++ {
+								for dx := -1; dx <= 1; dx++ {
+									nx, ny := cx+dx, cy+dy
+									if nx >= 0 && nx < 10 && ny >= 0 && ny < 10 {
+										occupied[ny][nx] = true
+									}
+								}
+							}
+						}
+						result = append(result, Ship{
+							ShipType:   size,
+							StartX:     x,
+							StartY:     y,
+							Horizontal: horizontal,
+						})
+						placed = true
+					}
+				}
+			}
+		}
+	}
+	return result
 }

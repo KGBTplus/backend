@@ -149,6 +149,16 @@ func (gs *GameStore) PlaceShips(gameID, playerID uuid.UUID, ships []Ship) bool {
 	return true
 }
 
+func (gs *GameStore) All() []*GameRoom {
+	gs.mu.RLock()
+	defer gs.mu.RUnlock()
+	result := make([]*GameRoom, 0, len(gs.games))
+	for _, g := range gs.games {
+		result = append(result, g)
+	}
+	return result
+}
+
 func (gs *GameStore) CheckAndStart(gameID uuid.UUID) {
 	g, ok := gs.games[gameID]
 	if !ok || g.Status != "placing_ships" || g.Player2ID == nil {
