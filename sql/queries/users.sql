@@ -17,3 +17,18 @@ WHERE id = $1;
 UPDATE users
 SET email_otp_enabled = true
 WHERE id = $1;
+
+-- name: DisableEmailOTP :exec
+UPDATE users
+SET email_otp_enabled = false
+WHERE id = $1;
+
+-- name: UpdateUsername :exec
+UPDATE users
+SET username = $2
+WHERE id = $1;
+
+-- name: UpdatePassword :exec
+UPDATE users
+SET password_hash = $2
+WHERE id = $1;

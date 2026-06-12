@@ -10,6 +10,25 @@ import (
 	"github.com/google/uuid"
 )
 
+type Lobby struct {
+	ID         uuid.UUID
+	CreatorID  uuid.UUID
+	Status     string
+	InviteCode string
+	MaxPlayers int32
+	CreatedAt  time.Time
+}
+
+type LobbyPlayer struct {
+	LobbyID  uuid.UUID
+	PlayerID uuid.UUID
+}
+
+type MatchmakingQueue struct {
+	PlayerID uuid.UUID
+	JoinedAt time.Time
+}
+
 type Profile struct {
 	UserID     uuid.UUID
 	TotalGames int32

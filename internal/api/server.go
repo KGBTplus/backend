@@ -444,8 +444,10 @@ func (s *Server) Disable2FA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: DB call to disable 2FA
-	_ = userID
+	if err := s.DB.DisableEmailOTP(r.Context(), userID); err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка отключения 2FA")
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "2FA disabled"})
@@ -515,8 +517,17 @@ func (s *Server) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: DB call UpdateUsername
-	_ = userID
+	if err := s.DB.UpdateUsername(r.Context(), db.UpdateUsernameParams{
+		ID:       userID,
+		Username: req.Username,
+	}); err != nil {
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			sendError(w, http.StatusConflict, "Никнейм уже занят")
+			return
+		}
+		sendError(w, http.StatusInternalServerError, "Ошибка обновления профиля")
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"username": req.Username})
@@ -543,8 +554,30 @@ func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: verify old password and update in DB
-	_ = userID
+	user, err := s.DB.GetUserByID(r.Context(), userID)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка получения пользователя")
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.OldPassword)); err != nil {
+		sendError(w, http.StatusUnauthorized, "Неверный текущий пароль")
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка при смене пароля")
+		return
+	}
+
+	if err := s.DB.UpdatePassword(r.Context(), db.UpdatePasswordParams{
+		ID:           userID,
+		PasswordHash: string(hash),
+	}); err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка при смене пароля")
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "password changed"})
@@ -1048,39 +1081,67 @@ func (s *Server) ResetShips(w http.ResponseWriter, r *http.Request, gameID opena
 // ---------- Лидерборд ----------
 
 func (s *Server) GetLeaderboard(w http.ResponseWriter, r *http.Request, params GetLeaderboardParams) {
-	_, err := s.getUserIDFromToken(r)
+	userID, err := s.getUserIDFromToken(r)
 	if err != nil {
 		sendError(w, http.StatusUnauthorized, "Не авторизован")
 		return
 	}
 
-	// TODO: implement DB query
-	_ = params
+	limit := int32(50)
+	if params.Limit != nil && *params.Limit > 0 {
+		limit = int32(*params.Limit)
+	}
+
+	rows, err := s.DB.GetLeaderboard(r.Context(), limit)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка получения таблицы лидеров")
+		return
+	}
+
+	var top []map[string]interface{}
+	for _, r := range rows {
+		top = append(top, map[string]interface{}{
+			"rank":        r.Rank,
+			"player_id":   r.PlayerID,
+			"username":    r.Username,
+			"wins":        r.Wins,
+			"losses":      r.Losses,
+			"total_games": r.TotalGames,
+			"win_rate":    r.WinRate,
+			"hit_rate":    r.HitRate,
+		})
+	}
+
+	var myRank interface{}
+	myRankRow, err := s.DB.GetPlayerRank(r.Context(), userID)
+	if err == nil {
+		winRate := 0.0
+		if myRankRow.TotalGames > 0 {
+			winRate = float64(myRankRow.Wins) / float64(myRankRow.TotalGames) * 100
+		}
+		hitRate := 0.0
+		if myRankRow.TotalShots > 0 {
+			hitRate = float64(myRankRow.Hits) / float64(myRankRow.TotalShots) * 100
+		}
+		myRank = map[string]interface{}{
+			"player_id":   myRankRow.ID,
+			"username":    myRankRow.Username,
+			"wins":        myRankRow.Wins,
+			"losses":      myRankRow.Losses,
+			"total_games": myRankRow.TotalGames,
+			"win_rate":    winRate,
+			"hit_rate":    hitRate,
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"top":     []interface{}{},
-		"my_rank": nil,
+		"top":     top,
+		"my_rank": myRank,
 	})
 }
 
-// ---------- Лобби (in-memory) ----------
-
-type lobby struct {
-	ID          uuid.UUID `json:"id"`
-	CreatorID   uuid.UUID `json:"creator_id"`
-	Status      string    `json:"status"`
-	InviteCode  string    `json:"invite_code"`
-	Players     []uuid.UUID `json:"players"`
-	MaxPlayers  int       `json:"max_players"`
-}
-
-type lobbyStore struct {
-	mu     sync.RWMutex
-	items  map[uuid.UUID]*lobby
-}
-
-var globalLobbyStore = &lobbyStore{items: make(map[uuid.UUID]*lobby)}
+// ---------- Лобби ----------
 
 func genInviteCode() string {
 	const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -1091,6 +1152,17 @@ func genInviteCode() string {
 	return string(code)
 }
 
+func lobbyToMap(l db.Lobby, players []uuid.UUID) map[string]interface{} {
+	m := map[string]interface{}{
+		"id":          l.ID,
+		"creator_id":  l.CreatorID,
+		"status":      l.Status,
+		"players":     players,
+		"max_players": l.MaxPlayers,
+	}
+	return m
+}
+
 func (s *Server) ListLobbies(w http.ResponseWriter, r *http.Request, params ListLobbiesParams) {
 	_, err := s.getUserIDFromToken(r)
 	if err != nil {
@@ -1098,17 +1170,31 @@ func (s *Server) ListLobbies(w http.ResponseWriter, r *http.Request, params List
 		return
 	}
 
-	globalLobbyStore.mu.RLock()
-	var result []*lobby
-	for _, l := range globalLobbyStore.items {
-		if params.Status != nil && l.Status != string(*params.Status) {
-			continue
-		}
-		result = append(result, l)
+	status := ""
+	if params.Status != nil {
+		status = string(*params.Status)
 	}
-	globalLobbyStore.mu.RUnlock()
+
+	rows, err := s.DB.ListLobbies(r.Context(), db.ListLobbiesParams{
+		Limit:  100,
+		Offset: 0,
+		Status: status,
+	})
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка получения лобби")
+		return
+	}
+
+	var result []map[string]interface{}
+	for _, l := range rows {
+		players, _ := s.DB.GetLobbyPlayers(r.Context(), l.ID)
+		if players == nil {
+			players = []uuid.UUID{}
+		}
+		result = append(result, lobbyToMap(l, players))
+	}
 	if result == nil {
-		result = []*lobby{}
+		result = []map[string]interface{}{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1122,21 +1208,29 @@ func (s *Server) CreateLobby(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	l := &lobby{
+	l, err := s.DB.CreateLobby(r.Context(), db.CreateLobbyParams{
 		ID:         uuid.New(),
 		CreatorID:  userID,
-		Status:     "waiting",
 		InviteCode: genInviteCode(),
-		Players:    []uuid.UUID{userID},
 		MaxPlayers: 2,
+	})
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка создания лобби")
+		return
 	}
-	globalLobbyStore.mu.Lock()
-	globalLobbyStore.items[l.ID] = l
-	globalLobbyStore.mu.Unlock()
+
+	if err := s.DB.AddLobbyPlayer(r.Context(), db.AddLobbyPlayerParams{
+		LobbyID:  l.ID,
+		PlayerID: userID,
+	}); err != nil {
+		s.DB.DeleteLobby(r.Context(), l.ID)
+		sendError(w, http.StatusInternalServerError, "Ошибка создания лобби")
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(l)
+	json.NewEncoder(w).Encode(lobbyToMap(l, []uuid.UUID{userID}))
 }
 
 func (s *Server) GetLobby(w http.ResponseWriter, r *http.Request, lobbyID openapi_types.UUID) {
@@ -1146,22 +1240,18 @@ func (s *Server) GetLobby(w http.ResponseWriter, r *http.Request, lobbyID openap
 		return
 	}
 
-	globalLobbyStore.mu.RLock()
-	l, ok := globalLobbyStore.items[uuid.UUID(lobbyID)]
-	globalLobbyStore.mu.RUnlock()
-
-	if !ok {
+	l, err := s.DB.GetLobby(r.Context(), uuid.UUID(lobbyID))
+	if err != nil {
 		sendError(w, http.StatusNotFound, "Лобби не найдено")
 		return
 	}
 
-	result := map[string]interface{}{
-		"id":         l.ID,
-		"creator_id": l.CreatorID,
-		"status":     l.Status,
-		"players":    l.Players,
-		"max_players": l.MaxPlayers,
+	players, err := s.DB.GetLobbyPlayers(r.Context(), l.ID)
+	if err != nil || players == nil {
+		players = []uuid.UUID{}
 	}
+
+	result := lobbyToMap(l, players)
 	if l.CreatorID == userID {
 		result["invite_code"] = l.InviteCode
 	}
@@ -1177,38 +1267,48 @@ func (s *Server) JoinLobby(w http.ResponseWriter, r *http.Request, lobbyID opena
 		return
 	}
 
-	globalLobbyStore.mu.Lock()
-	l, ok := globalLobbyStore.items[uuid.UUID(lobbyID)]
-	if !ok {
-		globalLobbyStore.mu.Unlock()
+	l, err := s.DB.GetLobby(r.Context(), uuid.UUID(lobbyID))
+	if err != nil {
 		sendError(w, http.StatusNotFound, "Лобби не найдено")
 		return
 	}
 	if l.Status != "waiting" {
-		globalLobbyStore.mu.Unlock()
 		sendError(w, http.StatusConflict, "Лобби уже заполнено")
 		return
 	}
-	for _, p := range l.Players {
-		if p == userID {
-			globalLobbyStore.mu.Unlock()
-			sendError(w, http.StatusConflict, "Вы уже в лобби")
-			return
-		}
-	}
-	if len(l.Players) >= l.MaxPlayers {
-		globalLobbyStore.mu.Unlock()
-		sendError(w, http.StatusConflict, "Лобби заполнено")
+
+	exists, err := s.DB.IsPlayerInLobby(r.Context(), db.IsPlayerInLobbyParams{
+		LobbyID:  l.ID,
+		PlayerID: userID,
+	})
+	if err == nil && exists {
+		sendError(w, http.StatusConflict, "Вы уже в лобби")
 		return
 	}
-	l.Players = append(l.Players, userID)
-	if len(l.Players) >= l.MaxPlayers {
+
+	if err := s.DB.AddLobbyPlayer(r.Context(), db.AddLobbyPlayerParams{
+		LobbyID:  l.ID,
+		PlayerID: userID,
+	}); err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка присоединения к лобби")
+		return
+	}
+
+	players, _ := s.DB.GetLobbyPlayers(r.Context(), l.ID)
+	if len(players) >= int(l.MaxPlayers) {
+		s.DB.UpdateLobbyStatus(r.Context(), db.UpdateLobbyStatusParams{
+			ID:     l.ID,
+			Status: "full",
+		})
 		l.Status = "full"
 	}
-	globalLobbyStore.mu.Unlock()
+
+	if players == nil {
+		players = []uuid.UUID{}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(l)
+	json.NewEncoder(w).Encode(lobbyToMap(l, players))
 }
 
 func (s *Server) LeaveLobby(w http.ResponseWriter, r *http.Request, lobbyID openapi_types.UUID) {
@@ -1218,40 +1318,35 @@ func (s *Server) LeaveLobby(w http.ResponseWriter, r *http.Request, lobbyID open
 		return
 	}
 
-	globalLobbyStore.mu.Lock()
-	l, ok := globalLobbyStore.items[uuid.UUID(lobbyID)]
-	if !ok {
-		globalLobbyStore.mu.Unlock()
+	if _, err := s.DB.GetLobby(r.Context(), uuid.UUID(lobbyID)); err != nil {
 		sendError(w, http.StatusNotFound, "Лобби не найдено")
 		return
 	}
-	var newPlayers []uuid.UUID
-	found := false
-	for _, p := range l.Players {
-		if p == userID {
-			found = true
-		} else {
-			newPlayers = append(newPlayers, p)
-		}
-	}
-	if !found {
-		globalLobbyStore.mu.Unlock()
+
+	if err := s.DB.RemoveLobbyPlayer(r.Context(), db.RemoveLobbyPlayerParams{
+		LobbyID:  uuid.UUID(lobbyID),
+		PlayerID: userID,
+	}); err != nil {
 		sendError(w, http.StatusBadRequest, "Вы не в этом лобби")
 		return
 	}
-	l.Players = newPlayers
-	if len(newPlayers) == 0 {
-		delete(globalLobbyStore.items, l.ID)
-		globalLobbyStore.mu.Unlock()
+
+	players, _ := s.DB.GetLobbyPlayers(r.Context(), uuid.UUID(lobbyID))
+	if len(players) == 0 {
+		s.DB.DeleteLobby(r.Context(), uuid.UUID(lobbyID))
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "lobby deleted"})
 		return
 	}
-	l.Status = "waiting"
-	globalLobbyStore.mu.Unlock()
 
+	s.DB.UpdateLobbyStatus(r.Context(), db.UpdateLobbyStatusParams{
+		ID:     uuid.UUID(lobbyID),
+		Status: "waiting",
+	})
+
+	l, _ := s.DB.GetLobby(r.Context(), uuid.UUID(lobbyID))
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(l)
+	json.NewEncoder(w).Encode(lobbyToMap(l, players))
 }
 
 func (s *Server) DeleteLobby(w http.ResponseWriter, r *http.Request, lobbyID openapi_types.UUID) {
@@ -1261,20 +1356,17 @@ func (s *Server) DeleteLobby(w http.ResponseWriter, r *http.Request, lobbyID ope
 		return
 	}
 
-	globalLobbyStore.mu.Lock()
-	l, ok := globalLobbyStore.items[uuid.UUID(lobbyID)]
-	if !ok {
-		globalLobbyStore.mu.Unlock()
+	l, err := s.DB.GetLobby(r.Context(), uuid.UUID(lobbyID))
+	if err != nil {
 		sendError(w, http.StatusNotFound, "Лобби не найдено")
 		return
 	}
 	if l.CreatorID != userID {
-		globalLobbyStore.mu.Unlock()
 		sendError(w, http.StatusForbidden, "Только создатель может удалить лобби")
 		return
 	}
-	delete(globalLobbyStore.items, l.ID)
-	globalLobbyStore.mu.Unlock()
+
+	s.DB.DeleteLobby(r.Context(), l.ID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "lobby deleted"})
@@ -1295,59 +1387,41 @@ func (s *Server) JoinLobbyByCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	globalLobbyStore.mu.Lock()
-	var found *lobby
-	for _, l := range globalLobbyStore.items {
-		if l.InviteCode == req.Code {
-			found = l
-			break
-		}
-	}
-	if found == nil {
-		globalLobbyStore.mu.Unlock()
+	l, err := s.DB.FindLobbyByCode(r.Context(), req.Code)
+	if err != nil {
 		sendError(w, http.StatusNotFound, "Лобби с таким кодом не найдено")
 		return
 	}
-	if found.Status != "waiting" {
-		globalLobbyStore.mu.Unlock()
+	if l.Status != "waiting" {
 		sendError(w, http.StatusConflict, "Лобби уже заполнено")
 		return
 	}
-	for _, p := range found.Players {
-		if p == userID {
-			globalLobbyStore.mu.Unlock()
-			sendError(w, http.StatusConflict, "Вы уже в лобби")
-			return
-		}
-	}
-	if len(found.Players) >= found.MaxPlayers {
-		globalLobbyStore.mu.Unlock()
-		sendError(w, http.StatusConflict, "Лобби заполнено")
+
+	if err := s.DB.AddLobbyPlayer(r.Context(), db.AddLobbyPlayerParams{
+		LobbyID:  l.ID,
+		PlayerID: userID,
+	}); err != nil {
+		sendError(w, http.StatusConflict, "Вы уже в лобби")
 		return
 	}
-	found.Players = append(found.Players, userID)
-	if len(found.Players) >= found.MaxPlayers {
-		found.Status = "full"
+
+	players, _ := s.DB.GetLobbyPlayers(r.Context(), l.ID)
+	if len(players) >= int(l.MaxPlayers) {
+		s.DB.UpdateLobbyStatus(r.Context(), db.UpdateLobbyStatusParams{
+			ID:     l.ID,
+			Status: "full",
+		})
+		l.Status = "full"
 	}
-	globalLobbyStore.mu.Unlock()
+	if players == nil {
+		players = []uuid.UUID{}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(found)
+	json.NewEncoder(w).Encode(lobbyToMap(l, players))
 }
 
-// ---------- Матчмейкинг (in-memory) ----------
-
-type matchmakingEntry struct {
-	PlayerID  uuid.UUID
-	JoinedAt  time.Time
-}
-
-type matchmakingStore struct {
-	mu    sync.Mutex
-	queue []matchmakingEntry
-}
-
-var globalMMStore = &matchmakingStore{}
+// ---------- Матчмейкинг ----------
 
 func (s *Server) JoinMatchmaking(w http.ResponseWriter, r *http.Request) {
 	userID, err := s.getUserIDFromToken(r)
@@ -1356,20 +1430,10 @@ func (s *Server) JoinMatchmaking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	globalMMStore.mu.Lock()
-	for _, e := range globalMMStore.queue {
-		if e.PlayerID == userID {
-			globalMMStore.mu.Unlock()
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"status": "already_in_queue"})
-			return
-		}
+	if err := s.DB.JoinMatchmaking(r.Context(), userID); err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка")
+		return
 	}
-	globalMMStore.queue = append(globalMMStore.queue, matchmakingEntry{
-		PlayerID: userID,
-		JoinedAt: time.Now(),
-	})
-	globalMMStore.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "searching"})
@@ -1382,23 +1446,19 @@ func (s *Server) GetMatchmakingStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	globalMMStore.mu.Lock()
-	inQueue := false
-	for _, e := range globalMMStore.queue {
-		if e.PlayerID == userID {
-			inQueue = true
-			break
-		}
+	inQueue, err := s.DB.GetMatchmakingStatus(r.Context(), userID)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка")
+		return
 	}
-	globalMMStore.mu.Unlock()
 
+	status := "not_found"
 	if inQueue {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "searching"})
-	} else {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "not_found"})
+		status = "searching"
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": status})
 }
 
 func (s *Server) LeaveMatchmaking(w http.ResponseWriter, r *http.Request) {
@@ -1408,15 +1468,7 @@ func (s *Server) LeaveMatchmaking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	globalMMStore.mu.Lock()
-	var newQueue []matchmakingEntry
-	for _, e := range globalMMStore.queue {
-		if e.PlayerID != userID {
-			newQueue = append(newQueue, e)
-		}
-	}
-	globalMMStore.queue = newQueue
-	globalMMStore.mu.Unlock()
+	s.DB.LeaveMatchmaking(r.Context(), userID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "left_queue"})
