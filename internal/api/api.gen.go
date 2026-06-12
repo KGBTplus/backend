@@ -26,6 +26,12 @@ const (
 // bearerAuthContextKey is the context key for BearerAuth security scheme
 type bearerAuthContextKey string
 
+// Authenticate2FAJSONBody defines parameters for Authenticate2FA.
+type Authenticate2FAJSONBody struct {
+	Code      string `json:"code"`
+	TempToken string `json:"temp_token"`
+}
+
 // Verify2FAJSONBody defines parameters for Verify2FA.
 type Verify2FAJSONBody struct {
 	Code string `json:"code"`
@@ -49,6 +55,9 @@ type RegisterJSONBody struct {
 	Username string `json:"username"`
 }
 
+// Authenticate2FAJSONRequestBody defines body for Authenticate2FA for application/json ContentType.
+type Authenticate2FAJSONRequestBody Authenticate2FAJSONBody
+
 // Verify2FAJSONRequestBody defines body for Verify2FA for application/json ContentType.
 type Verify2FAJSONRequestBody Verify2FAJSONBody
 
@@ -60,10 +69,13 @@ type RegisterJSONRequestBody RegisterJSONBody
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
-	// Начать настройку 2FA (генерирует секрет и QR-код)
+	// Подтвердить 2FA код и получить JWT
+	// (POST /auth/2fa/authenticate)
+	Authenticate2FA(w http.ResponseWriter, r *http.Request)
+	// Начать настройку 2FA (отправляет код на email)
 	// (POST /auth/2fa/setup)
 	Setup2FA(w http.ResponseWriter, r *http.Request)
-	// Подтвердить код и активировать 2FA
+	// Подтвердить код с email и активировать 2FA
 	// (POST /auth/2fa/verify)
 	Verify2FA(w http.ResponseWriter, r *http.Request)
 	// Вход в систему
@@ -78,13 +90,19 @@ type ServerInterface interface {
 
 type Unimplemented struct{}
 
-// Начать настройку 2FA (генерирует секрет и QR-код)
+// Подтвердить 2FA код и получить JWT
+// (POST /auth/2fa/authenticate)
+func (_ Unimplemented) Authenticate2FA(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Начать настройку 2FA (отправляет код на email)
 // (POST /auth/2fa/setup)
 func (_ Unimplemented) Setup2FA(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Подтвердить код и активировать 2FA
+// Подтвердить код с email и активировать 2FA
 // (POST /auth/2fa/verify)
 func (_ Unimplemented) Verify2FA(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -110,6 +128,20 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// Authenticate2FA operation middleware
+func (siw *ServerInterfaceWrapper) Authenticate2FA(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Authenticate2FA(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // Setup2FA operation middleware
 func (siw *ServerInterfaceWrapper) Setup2FA(w http.ResponseWriter, r *http.Request) {
@@ -293,6 +325,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/auth/2fa/authenticate", wrapper.Authenticate2FA)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/2fa/setup", wrapper.Setup2FA)
 	})
 	r.Group(func(r chi.Router) {
@@ -313,23 +348,25 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"DFHfQTGYnkdDOKT0t/4KAAD//w==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

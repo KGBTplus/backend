@@ -44,31 +44,30 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 	return i, err
 }
 
-const enableOTP = `-- name: EnableOTP :exec
+const enableEmailOTP = `-- name: EnableEmailOTP :exec
 UPDATE users
-SET otp_enabled = true
+SET email_otp_enabled = true
 WHERE id = $1
 `
 
-func (q *Queries) EnableOTP(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, enableOTP, id)
+func (q *Queries) EnableEmailOTP(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, enableEmailOTP, id)
 	return err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, password_hash, email, created_at, otp_enabled, otp_secret
+SELECT id, username, password_hash, email, created_at, email_otp_enabled
 FROM users
 WHERE id = $1
 `
 
 type GetUserByIDRow struct {
-	ID           uuid.UUID
-	Username     string
-	PasswordHash string
-	Email        string
-	CreatedAt    time.Time
-	OtpEnabled   sql.NullBool
-	OtpSecret    sql.NullString
+	ID              uuid.UUID
+	Username        string
+	PasswordHash    string
+	Email           string
+	CreatedAt       time.Time
+	EmailOtpEnabled bool
 }
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow, error) {
@@ -80,26 +79,24 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow
 		&i.PasswordHash,
 		&i.Email,
 		&i.CreatedAt,
-		&i.OtpEnabled,
-		&i.OtpSecret,
+		&i.EmailOtpEnabled,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, password_hash, email, created_at, otp_enabled, otp_secret
+SELECT id, username, password_hash, email, created_at, email_otp_enabled
 FROM users
 WHERE username = $1
 `
 
 type GetUserByUsernameRow struct {
-	ID           uuid.UUID
-	Username     string
-	PasswordHash string
-	Email        string
-	CreatedAt    time.Time
-	OtpEnabled   sql.NullBool
-	OtpSecret    sql.NullString
+	ID              uuid.UUID
+	Username        string
+	PasswordHash    string
+	Email           string
+	CreatedAt       time.Time
+	EmailOtpEnabled bool
 }
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error) {
@@ -111,8 +108,7 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 		&i.PasswordHash,
 		&i.Email,
 		&i.CreatedAt,
-		&i.OtpEnabled,
-		&i.OtpSecret,
+		&i.EmailOtpEnabled,
 	)
 	return i, err
 }

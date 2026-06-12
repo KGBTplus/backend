@@ -4,19 +4,20 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/KGBTplus/backend/internal/api"
 	"github.com/KGBTplus/backend/internal/db"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/pressly/goose/v3"
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 )
 
 func runMigrations(db *sql.DB) {
-	// Укажи путь к папке с твоими .sql миграциями
 	if err := goose.SetDialect("postgres"); err != nil {
 		log.Fatal(err)
 	}
@@ -27,9 +28,18 @@ func runMigrations(db *sql.DB) {
 	log.Println("Миграции успешно применены!")
 }
 
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 func main() {
+	godotenv.Load()
+
 	// 1. Подключение к БД
-	connStr := "postgres://user:password@localhost:5432/game?sslmode=disable"
+	connStr := getEnv("DATABASE_URL", "postgres://user:password@localhost:5432/game?sslmode=disable")
 	dbConn, err := sql.Open("postgres", connStr)
 	if err != nil {
 		log.Fatalf("Ошибка подключения к БД: %v", err)
@@ -40,18 +50,25 @@ func main() {
 
 	runMigrations(dbConn)
 
-	// 2. Инициализация сервера
-	srv := &api.Server{
-		DB: queries,
+	// 2. SMTP конфигурация (можно не заполнять — код будет печататься в лог)
+	smtpCfg := api.SMTPConfig{
+		Host:     getEnv("SMTP_HOST", ""),
+		Username: getEnv("SMTP_USERNAME", ""),
+		Password: getEnv("SMTP_PASSWORD", ""),
+		From:     getEnv("SMTP_FROM", "noreply@seabattle.ru"),
 	}
 
-	// 3. Настройка роутера
+	// 3. Инициализация сервера
+	jwtSecret := getEnv("JWT_SECRET", "my_secret_key")
+	srv := api.NewServer(queries, smtpCfg, jwtSecret)
+
+	// 4. Настройка роутера
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
 	r.Get("/swagger/*", httpSwagger.Handler(
-		httpSwagger.URL("http://localhost:8080/swagger/doc.json"), // Путь к твоему spec файлу
+		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
 	))
 
 	r.Get("/swagger/doc.json", func(w http.ResponseWriter, r *http.Request) {
@@ -64,8 +81,7 @@ func main() {
 		w.Write(spec)
 	})
 
-	// 4. Связка с OpenAPI
-	// Поскольку strict-server теперь false, мы передаем srv напрямую
+	// 5. Связка с OpenAPI
 	api.HandlerFromMux(srv, r)
 
 	// (Опционально) Вывод маршрутов для отладки
@@ -75,7 +91,7 @@ func main() {
 		return nil
 	})
 
-	// 5. Запуск
+	// 6. Запуск
 	port := ":8080"
 	log.Printf("Сервер запущен на http://localhost%s", port)
 	if err := http.ListenAndServe(port, r); err != nil {
