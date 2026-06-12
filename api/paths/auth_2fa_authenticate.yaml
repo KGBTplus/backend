@@ -1,6 +1,6 @@
 post:
   operationId: authenticate2FA
-  summary: Подтвердить 2FA код и получить JWT (второй шаг логина)
+  summary: Подтвердить 2FA код и получить JWT
   requestBody:
     required: true
     content:
@@ -10,10 +10,8 @@ post:
           properties:
             temp_token:
               type: string
-              description: Временный токен из /auth/login (когда 2FA включена)
             code:
               type: string
-              description: 6-значный код из TOTP-приложения
           required:
             - temp_token
             - code
@@ -29,10 +27,3 @@ post:
                 type: string
     '401':
       description: Неверный код или истёк срок temp_token
-      content:
-        application/json:
-          schema:
-            type: object
-            properties:
-              error:
-                type: string

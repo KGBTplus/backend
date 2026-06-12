@@ -1,0 +1,30 @@
+get:
+  operationId: listGames
+  summary: Список доступных игр
+  security:
+    - BearerAuth: []
+  responses:
+    '200':
+      description: Список игр
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: ../components/schemas/Game.yaml
+    '401':
+      description: Не авторизован
+post:
+  operationId: createGame
+  summary: Создать новую игру
+  security:
+    - BearerAuth: []
+  responses:
+    '201':
+      description: Игра создана
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Game.yaml
+    '401':
+      description: Не авторизован

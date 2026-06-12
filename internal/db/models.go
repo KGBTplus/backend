@@ -5,11 +5,39 @@
 package db
 
 import (
-	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+type Lobby struct {
+	ID         uuid.UUID
+	CreatorID  uuid.UUID
+	Status     string
+	InviteCode string
+	MaxPlayers int32
+	CreatedAt  time.Time
+}
+
+type LobbyPlayer struct {
+	LobbyID  uuid.UUID
+	PlayerID uuid.UUID
+}
+
+type MatchmakingQueue struct {
+	PlayerID uuid.UUID
+	JoinedAt time.Time
+}
+
+type Profile struct {
+	UserID     uuid.UUID
+	TotalGames int32
+	Wins       int32
+	Losses     int32
+	ShipsSunk  int32
+	TotalShots int32
+	Hits       int32
+}
 
 type User struct {
 	ID              uuid.UUID

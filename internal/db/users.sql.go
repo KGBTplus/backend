@@ -7,7 +7,6 @@ package db
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,6 +41,17 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const disableEmailOTP = `-- name: DisableEmailOTP :exec
+UPDATE users
+SET email_otp_enabled = false
+WHERE id = $1
+`
+
+func (q *Queries) DisableEmailOTP(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, disableEmailOTP, id)
+	return err
 }
 
 const enableEmailOTP = `-- name: EnableEmailOTP :exec
@@ -113,18 +123,34 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 	return i, err
 }
 
-const updateOTPSecret = `-- name: UpdateOTPSecret :exec
+const updatePassword = `-- name: UpdatePassword :exec
 UPDATE users
-SET otp_secret = $2
+SET password_hash = $2
 WHERE id = $1
 `
 
-type UpdateOTPSecretParams struct {
-	ID        uuid.UUID
-	OtpSecret sql.NullString
+type UpdatePasswordParams struct {
+	ID           uuid.UUID
+	PasswordHash string
 }
 
-func (q *Queries) UpdateOTPSecret(ctx context.Context, arg UpdateOTPSecretParams) error {
-	_, err := q.db.ExecContext(ctx, updateOTPSecret, arg.ID, arg.OtpSecret)
+func (q *Queries) UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error {
+	_, err := q.db.ExecContext(ctx, updatePassword, arg.ID, arg.PasswordHash)
+	return err
+}
+
+const updateUsername = `-- name: UpdateUsername :exec
+UPDATE users
+SET username = $2
+WHERE id = $1
+`
+
+type UpdateUsernameParams struct {
+	ID       uuid.UUID
+	Username string
+}
+
+func (q *Queries) UpdateUsername(ctx context.Context, arg UpdateUsernameParams) error {
+	_, err := q.db.ExecContext(ctx, updateUsername, arg.ID, arg.Username)
 	return err
 }

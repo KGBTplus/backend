@@ -1,6 +1,6 @@
 post:
   operationId: makeMove
-  summary: Сделать ход (выстрел)
+  summary: Сделать ход
   security:
     - BearerAuth: []
   parameters:
@@ -15,31 +15,29 @@ post:
     content:
       application/json:
         schema:
-          $ref: ../components/schemas/MoveRequest.yaml
+          type: object
+          properties:
+            x:
+              type: integer
+              minimum: 0
+              maximum: 9
+            y:
+              type: integer
+              minimum: 0
+              maximum: 9
+          required:
+            - x
+            - y
   responses:
     '200':
-      description: Результат хода
+      description: Ход выполнен
       content:
         application/json:
           schema:
-            $ref: ../components/schemas/MoveResponse.yaml
+            $ref: ../components/schemas/Game.yaml
     '400':
-      description: Некорректные координаты или не ваш ход
-      content:
-        application/json:
-          schema:
-            $ref: ../components/schemas/Error.yaml
+      description: Некорректный ход
     '401':
       description: Не авторизован
-    '403':
-      description: Вы не участник этой игры
-      content:
-        application/json:
-          schema:
-            $ref: ../components/schemas/Error.yaml
     '404':
       description: Игра не найдена
-      content:
-        application/json:
-          schema:
-            $ref: ../components/schemas/Error.yaml

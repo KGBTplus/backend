@@ -1,6 +1,6 @@
 post:
   operationId: placeShips
-  summary: Расставить корабли вручную с проверкой корректности
+  summary: Расставить корабли
   security:
     - BearerAuth: []
   parameters:
@@ -19,7 +19,6 @@ post:
           properties:
             ships:
               type: array
-              description: Набор из 10 кораблей. Валидация: 1×4 + 2×3 + 3×2 + 4×1, без пересечений и касаний
               items:
                 type: object
                 properties:
@@ -27,7 +26,6 @@ post:
                     type: integer
                     minimum: 1
                     maximum: 4
-                    description: 1=однопалубный, 2=двухпалубный, 3=трёхпалубный, 4=четырёхпалубный
                   start_x:
                     type: integer
                     minimum: 0
@@ -38,7 +36,6 @@ post:
                     maximum: 9
                   horizontal:
                     type: boolean
-                    description: true — горизонтально, false — вертикально
                 required:
                   - ship_type
                   - start_x
@@ -46,41 +43,14 @@ post:
                   - horizontal
   responses:
     '200':
-      description: Корабли расставлены корректно
+      description: Корабли расставлены
       content:
         application/json:
           schema:
-            type: object
-            properties:
-              ships:
-                type: array
-                items:
-                  $ref: ../components/schemas/Ship.yaml
-              message:
-                type: string
-    '400':
-      description: Некорректная расстановка (пересечение, касание, неверное количество, выход за границы)
-      content:
-        application/json:
-          schema:
-            $ref: ../components/schemas/Error.yaml
+            $ref: ../components/schemas/Game.yaml
     '401':
       description: Не авторизован
-    '403':
-      description: Вы не участник этой игры
-      content:
-        application/json:
-          schema:
-            $ref: ../components/schemas/Error.yaml
+    '400':
+      description: Некорректная расстановка
     '404':
       description: Игра не найдена
-      content:
-        application/json:
-          schema:
-            $ref: ../components/schemas/Error.yaml
-    '409':
-      description: Игра не в фазе расстановки
-      content:
-        application/json:
-          schema:
-            $ref: ../components/schemas/Error.yaml

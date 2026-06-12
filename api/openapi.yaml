@@ -43,6 +43,8 @@ paths:
     $ref: paths/matchmaking.yaml
   /matchmaking/status:
     $ref: paths/matchmaking_status.yaml
+  /games:
+    $ref: paths/games.yaml
   /games/active:
     $ref: paths/game_active.yaml
   /games/history:

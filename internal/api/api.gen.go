@@ -8,6 +8,7 @@ import (
 	"compress/flate"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -16,12 +17,433 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/go-chi/chi/v5"
+	"github.com/oapi-codegen/runtime"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 const (
 	BearerAuthScopes bearerAuthContextKey = "BearerAuth.Scopes"
 )
+
+// Defines values for ListGames200JSONResponseBodyStatus.
+const (
+	ListGames200JSONResponseBodyStatusFinished     ListGames200JSONResponseBodyStatus = "finished"
+	ListGames200JSONResponseBodyStatusPlacingShips ListGames200JSONResponseBodyStatus = "placing_ships"
+	ListGames200JSONResponseBodyStatusPlaying      ListGames200JSONResponseBodyStatus = "playing"
+	ListGames200JSONResponseBodyStatusWaiting      ListGames200JSONResponseBodyStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the ListGames200JSONResponseBodyStatus enum.
+func (e ListGames200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case ListGames200JSONResponseBodyStatusFinished:
+		return true
+	case ListGames200JSONResponseBodyStatusPlacingShips:
+		return true
+	case ListGames200JSONResponseBodyStatusPlaying:
+		return true
+	case ListGames200JSONResponseBodyStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateGame201JSONResponseBodyStatus.
+const (
+	CreateGame201JSONResponseBodyStatusFinished     CreateGame201JSONResponseBodyStatus = "finished"
+	CreateGame201JSONResponseBodyStatusPlacingShips CreateGame201JSONResponseBodyStatus = "placing_ships"
+	CreateGame201JSONResponseBodyStatusPlaying      CreateGame201JSONResponseBodyStatus = "playing"
+	CreateGame201JSONResponseBodyStatusWaiting      CreateGame201JSONResponseBodyStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the CreateGame201JSONResponseBodyStatus enum.
+func (e CreateGame201JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case CreateGame201JSONResponseBodyStatusFinished:
+		return true
+	case CreateGame201JSONResponseBodyStatusPlacingShips:
+		return true
+	case CreateGame201JSONResponseBodyStatusPlaying:
+		return true
+	case CreateGame201JSONResponseBodyStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetActiveGames200JSONResponseBodyStatus.
+const (
+	GetActiveGames200JSONResponseBodyStatusFinished     GetActiveGames200JSONResponseBodyStatus = "finished"
+	GetActiveGames200JSONResponseBodyStatusPlacingShips GetActiveGames200JSONResponseBodyStatus = "placing_ships"
+	GetActiveGames200JSONResponseBodyStatusPlaying      GetActiveGames200JSONResponseBodyStatus = "playing"
+	GetActiveGames200JSONResponseBodyStatusWaiting      GetActiveGames200JSONResponseBodyStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the GetActiveGames200JSONResponseBodyStatus enum.
+func (e GetActiveGames200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case GetActiveGames200JSONResponseBodyStatusFinished:
+		return true
+	case GetActiveGames200JSONResponseBodyStatusPlacingShips:
+		return true
+	case GetActiveGames200JSONResponseBodyStatusPlaying:
+		return true
+	case GetActiveGames200JSONResponseBodyStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetActiveGames200JSONResponseBodyWinReason.
+const (
+	GetActiveGames200JSONResponseBodyWinReasonAllShipsSunk GetActiveGames200JSONResponseBodyWinReason = "all_ships_sunk"
+	GetActiveGames200JSONResponseBodyWinReasonForfeit      GetActiveGames200JSONResponseBodyWinReason = "forfeit"
+	GetActiveGames200JSONResponseBodyWinReasonTimeout      GetActiveGames200JSONResponseBodyWinReason = "timeout"
+)
+
+// Valid indicates whether the value is a known member of the GetActiveGames200JSONResponseBodyWinReason enum.
+func (e GetActiveGames200JSONResponseBodyWinReason) Valid() bool {
+	switch e {
+	case GetActiveGames200JSONResponseBodyWinReasonAllShipsSunk:
+		return true
+	case GetActiveGames200JSONResponseBodyWinReasonForfeit:
+		return true
+	case GetActiveGames200JSONResponseBodyWinReasonTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetGameHistory200JSONResponseBodyGamesResult.
+const (
+	Draw GetGameHistory200JSONResponseBodyGamesResult = "draw"
+	Loss GetGameHistory200JSONResponseBodyGamesResult = "loss"
+	Win  GetGameHistory200JSONResponseBodyGamesResult = "win"
+)
+
+// Valid indicates whether the value is a known member of the GetGameHistory200JSONResponseBodyGamesResult enum.
+func (e GetGameHistory200JSONResponseBodyGamesResult) Valid() bool {
+	switch e {
+	case Draw:
+		return true
+	case Loss:
+		return true
+	case Win:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetGameHistory200JSONResponseBodyGamesWinReason.
+const (
+	GetGameHistory200JSONResponseBodyGamesWinReasonAllShipsSunk GetGameHistory200JSONResponseBodyGamesWinReason = "all_ships_sunk"
+	GetGameHistory200JSONResponseBodyGamesWinReasonForfeit      GetGameHistory200JSONResponseBodyGamesWinReason = "forfeit"
+	GetGameHistory200JSONResponseBodyGamesWinReasonTimeout      GetGameHistory200JSONResponseBodyGamesWinReason = "timeout"
+)
+
+// Valid indicates whether the value is a known member of the GetGameHistory200JSONResponseBodyGamesWinReason enum.
+func (e GetGameHistory200JSONResponseBodyGamesWinReason) Valid() bool {
+	switch e {
+	case GetGameHistory200JSONResponseBodyGamesWinReasonAllShipsSunk:
+		return true
+	case GetGameHistory200JSONResponseBodyGamesWinReasonForfeit:
+		return true
+	case GetGameHistory200JSONResponseBodyGamesWinReasonTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetGameState200JSONResponseBodyStatus.
+const (
+	GetGameState200JSONResponseBodyStatusFinished     GetGameState200JSONResponseBodyStatus = "finished"
+	GetGameState200JSONResponseBodyStatusPlacingShips GetGameState200JSONResponseBodyStatus = "placing_ships"
+	GetGameState200JSONResponseBodyStatusPlaying      GetGameState200JSONResponseBodyStatus = "playing"
+	GetGameState200JSONResponseBodyStatusWaiting      GetGameState200JSONResponseBodyStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the GetGameState200JSONResponseBodyStatus enum.
+func (e GetGameState200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case GetGameState200JSONResponseBodyStatusFinished:
+		return true
+	case GetGameState200JSONResponseBodyStatusPlacingShips:
+		return true
+	case GetGameState200JSONResponseBodyStatusPlaying:
+		return true
+	case GetGameState200JSONResponseBodyStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetGameState200JSONResponseBodyWinReason.
+const (
+	GetGameState200JSONResponseBodyWinReasonAllShipsSunk GetGameState200JSONResponseBodyWinReason = "all_ships_sunk"
+	GetGameState200JSONResponseBodyWinReasonForfeit      GetGameState200JSONResponseBodyWinReason = "forfeit"
+	GetGameState200JSONResponseBodyWinReasonTimeout      GetGameState200JSONResponseBodyWinReason = "timeout"
+)
+
+// Valid indicates whether the value is a known member of the GetGameState200JSONResponseBodyWinReason enum.
+func (e GetGameState200JSONResponseBodyWinReason) Valid() bool {
+	switch e {
+	case GetGameState200JSONResponseBodyWinReasonAllShipsSunk:
+		return true
+	case GetGameState200JSONResponseBodyWinReasonForfeit:
+		return true
+	case GetGameState200JSONResponseBodyWinReasonTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MakeMove200JSONResponseBodyStatus.
+const (
+	MakeMove200JSONResponseBodyStatusFinished     MakeMove200JSONResponseBodyStatus = "finished"
+	MakeMove200JSONResponseBodyStatusPlacingShips MakeMove200JSONResponseBodyStatus = "placing_ships"
+	MakeMove200JSONResponseBodyStatusPlaying      MakeMove200JSONResponseBodyStatus = "playing"
+	MakeMove200JSONResponseBodyStatusWaiting      MakeMove200JSONResponseBodyStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the MakeMove200JSONResponseBodyStatus enum.
+func (e MakeMove200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case MakeMove200JSONResponseBodyStatusFinished:
+		return true
+	case MakeMove200JSONResponseBodyStatusPlacingShips:
+		return true
+	case MakeMove200JSONResponseBodyStatusPlaying:
+		return true
+	case MakeMove200JSONResponseBodyStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RequestRematch202JSONResponseBodyStatus.
+const (
+	RequestRematch202JSONResponseBodyStatusWaitingForOpponent RequestRematch202JSONResponseBodyStatus = "waiting_for_opponent"
+)
+
+// Valid indicates whether the value is a known member of the RequestRematch202JSONResponseBodyStatus enum.
+func (e RequestRematch202JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case RequestRematch202JSONResponseBodyStatusWaitingForOpponent:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetGameReplay200JSONResponseBodyGameWinReason.
+const (
+	GetGameReplay200JSONResponseBodyGameWinReasonAllShipsSunk GetGameReplay200JSONResponseBodyGameWinReason = "all_ships_sunk"
+	GetGameReplay200JSONResponseBodyGameWinReasonForfeit      GetGameReplay200JSONResponseBodyGameWinReason = "forfeit"
+	GetGameReplay200JSONResponseBodyGameWinReasonTimeout      GetGameReplay200JSONResponseBodyGameWinReason = "timeout"
+)
+
+// Valid indicates whether the value is a known member of the GetGameReplay200JSONResponseBodyGameWinReason enum.
+func (e GetGameReplay200JSONResponseBodyGameWinReason) Valid() bool {
+	switch e {
+	case GetGameReplay200JSONResponseBodyGameWinReasonAllShipsSunk:
+		return true
+	case GetGameReplay200JSONResponseBodyGameWinReasonForfeit:
+		return true
+	case GetGameReplay200JSONResponseBodyGameWinReasonTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetGameResult200JSONResponseBodyWinReason.
+const (
+	AllShipsSunk GetGameResult200JSONResponseBodyWinReason = "all_ships_sunk"
+	Forfeit      GetGameResult200JSONResponseBodyWinReason = "forfeit"
+	Timeout      GetGameResult200JSONResponseBodyWinReason = "timeout"
+)
+
+// Valid indicates whether the value is a known member of the GetGameResult200JSONResponseBodyWinReason enum.
+func (e GetGameResult200JSONResponseBodyWinReason) Valid() bool {
+	switch e {
+	case AllShipsSunk:
+		return true
+	case Forfeit:
+		return true
+	case Timeout:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PlaceShips200JSONResponseBodyStatus.
+const (
+	PlaceShips200JSONResponseBodyStatusFinished     PlaceShips200JSONResponseBodyStatus = "finished"
+	PlaceShips200JSONResponseBodyStatusPlacingShips PlaceShips200JSONResponseBodyStatus = "placing_ships"
+	PlaceShips200JSONResponseBodyStatusPlaying      PlaceShips200JSONResponseBodyStatus = "playing"
+	PlaceShips200JSONResponseBodyStatusWaiting      PlaceShips200JSONResponseBodyStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the PlaceShips200JSONResponseBodyStatus enum.
+func (e PlaceShips200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case PlaceShips200JSONResponseBodyStatusFinished:
+		return true
+	case PlaceShips200JSONResponseBodyStatusPlacingShips:
+		return true
+	case PlaceShips200JSONResponseBodyStatusPlaying:
+		return true
+	case PlaceShips200JSONResponseBodyStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfirmShips200JSONResponseBodyStatus.
+const (
+	ConfirmShips200JSONResponseBodyStatusPlaying            ConfirmShips200JSONResponseBodyStatus = "playing"
+	ConfirmShips200JSONResponseBodyStatusWaitingForOpponent ConfirmShips200JSONResponseBodyStatus = "waiting_for_opponent"
+)
+
+// Valid indicates whether the value is a known member of the ConfirmShips200JSONResponseBodyStatus enum.
+func (e ConfirmShips200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case ConfirmShips200JSONResponseBodyStatusPlaying:
+		return true
+	case ConfirmShips200JSONResponseBodyStatusWaitingForOpponent:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetLeaderboardParamsSortBy.
+const (
+	HitRate    GetLeaderboardParamsSortBy = "hit_rate"
+	TotalGames GetLeaderboardParamsSortBy = "total_games"
+	WinRate    GetLeaderboardParamsSortBy = "win_rate"
+	Wins       GetLeaderboardParamsSortBy = "wins"
+)
+
+// Valid indicates whether the value is a known member of the GetLeaderboardParamsSortBy enum.
+func (e GetLeaderboardParamsSortBy) Valid() bool {
+	switch e {
+	case HitRate:
+		return true
+	case TotalGames:
+		return true
+	case WinRate:
+		return true
+	case Wins:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListLobbiesParamsStatus.
+const (
+	ListLobbiesParamsStatusInGame  ListLobbiesParamsStatus = "in_game"
+	ListLobbiesParamsStatusWaiting ListLobbiesParamsStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the ListLobbiesParamsStatus enum.
+func (e ListLobbiesParamsStatus) Valid() bool {
+	switch e {
+	case ListLobbiesParamsStatusInGame:
+		return true
+	case ListLobbiesParamsStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListLobbies200JSONResponseBodyStatus.
+const (
+	ListLobbies200JSONResponseBodyStatusClosed  ListLobbies200JSONResponseBodyStatus = "closed"
+	ListLobbies200JSONResponseBodyStatusInGame  ListLobbies200JSONResponseBodyStatus = "in_game"
+	ListLobbies200JSONResponseBodyStatusWaiting ListLobbies200JSONResponseBodyStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the ListLobbies200JSONResponseBodyStatus enum.
+func (e ListLobbies200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case ListLobbies200JSONResponseBodyStatusClosed:
+		return true
+	case ListLobbies200JSONResponseBodyStatusInGame:
+		return true
+	case ListLobbies200JSONResponseBodyStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetLobby200JSONResponseBodyStatus.
+const (
+	Closed  GetLobby200JSONResponseBodyStatus = "closed"
+	InGame  GetLobby200JSONResponseBodyStatus = "in_game"
+	Waiting GetLobby200JSONResponseBodyStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the GetLobby200JSONResponseBodyStatus enum.
+func (e GetLobby200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case Closed:
+		return true
+	case InGame:
+		return true
+	case Waiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for JoinMatchmaking200JSONResponseBodyStatus.
+const (
+	JoinMatchmaking200JSONResponseBodyStatusSearching JoinMatchmaking200JSONResponseBodyStatus = "searching"
+)
+
+// Valid indicates whether the value is a known member of the JoinMatchmaking200JSONResponseBodyStatus enum.
+func (e JoinMatchmaking200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case JoinMatchmaking200JSONResponseBodyStatusSearching:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetMatchmakingStatus200JSONResponseBodyStatus.
+const (
+	GetMatchmakingStatus200JSONResponseBodyStatusFound     GetMatchmakingStatus200JSONResponseBodyStatus = "found"
+	GetMatchmakingStatus200JSONResponseBodyStatusSearching GetMatchmakingStatus200JSONResponseBodyStatus = "searching"
+)
+
+// Valid indicates whether the value is a known member of the GetMatchmakingStatus200JSONResponseBodyStatus enum.
+func (e GetMatchmakingStatus200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case GetMatchmakingStatus200JSONResponseBodyStatusFound:
+		return true
+	case GetMatchmakingStatus200JSONResponseBodyStatusSearching:
+		return true
+	default:
+		return false
+	}
+}
 
 // bearerAuthContextKey is the context key for BearerAuth security scheme
 type bearerAuthContextKey string
@@ -55,6 +477,127 @@ type RegisterJSONBody struct {
 	Username string `json:"username"`
 }
 
+// ListGames200JSONResponseBodyStatus defines parameters for ListGames.
+type ListGames200JSONResponseBodyStatus string
+
+// CreateGame201JSONResponseBodyStatus defines parameters for CreateGame.
+type CreateGame201JSONResponseBodyStatus string
+
+// GetActiveGames200JSONResponseBodyStatus defines parameters for GetActiveGames.
+type GetActiveGames200JSONResponseBodyStatus string
+
+// GetActiveGames200JSONResponseBodyWinReason defines parameters for GetActiveGames.
+type GetActiveGames200JSONResponseBodyWinReason string
+
+// GetGameHistoryParams defines parameters for GetGameHistory.
+type GetGameHistoryParams struct {
+	Page  *int `form:"page,omitempty" json:"page,omitempty"`
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// OpponentUsername Фильтр по имени соперника
+	OpponentUsername *string `form:"opponent_username,omitempty" json:"opponent_username,omitempty"`
+}
+
+// GetGameHistory200JSONResponseBodyGamesResult defines parameters for GetGameHistory.
+type GetGameHistory200JSONResponseBodyGamesResult string
+
+// GetGameHistory200JSONResponseBodyGamesWinReason defines parameters for GetGameHistory.
+type GetGameHistory200JSONResponseBodyGamesWinReason string
+
+// GetGameState200JSONResponseBodyStatus defines parameters for GetGameState.
+type GetGameState200JSONResponseBodyStatus string
+
+// GetGameState200JSONResponseBodyWinReason defines parameters for GetGameState.
+type GetGameState200JSONResponseBodyWinReason string
+
+// MakeMoveJSONBody defines parameters for MakeMove.
+type MakeMoveJSONBody struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+}
+
+// MakeMove200JSONResponseBodyStatus defines parameters for MakeMove.
+type MakeMove200JSONResponseBodyStatus string
+
+// RequestRematch202JSONResponseBodyStatus defines parameters for RequestRematch.
+type RequestRematch202JSONResponseBodyStatus string
+
+// GetGameReplay200JSONResponseBodyGameWinReason defines parameters for GetGameReplay.
+type GetGameReplay200JSONResponseBodyGameWinReason string
+
+// GetGameResult200JSONResponseBodyWinReason defines parameters for GetGameResult.
+type GetGameResult200JSONResponseBodyWinReason string
+
+// PlaceShipsJSONBody defines parameters for PlaceShips.
+type PlaceShipsJSONBody struct {
+	Ships *[]struct {
+		Horizontal bool `json:"horizontal"`
+		ShipType   int  `json:"ship_type"`
+		StartX     int  `json:"start_x"`
+		StartY     int  `json:"start_y"`
+	} `json:"ships,omitempty"`
+}
+
+// PlaceShips200JSONResponseBodyStatus defines parameters for PlaceShips.
+type PlaceShips200JSONResponseBodyStatus string
+
+// ConfirmShips200JSONResponseBodyStatus defines parameters for ConfirmShips.
+type ConfirmShips200JSONResponseBodyStatus string
+
+// GetLeaderboardParams defines parameters for GetLeaderboard.
+type GetLeaderboardParams struct {
+	// SortBy Поле для сортировки
+	SortBy *GetLeaderboardParamsSortBy `form:"sort_by,omitempty" json:"sort_by,omitempty"`
+
+	// Limit Количество записей в топе
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetLeaderboardParamsSortBy defines parameters for GetLeaderboard.
+type GetLeaderboardParamsSortBy string
+
+// ListLobbiesParams defines parameters for ListLobbies.
+type ListLobbiesParams struct {
+	// Status Фильтр по статусу
+	Status *ListLobbiesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	Page   *int                     `form:"page,omitempty" json:"page,omitempty"`
+	Limit  *int                     `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListLobbiesParamsStatus defines parameters for ListLobbies.
+type ListLobbiesParamsStatus string
+
+// ListLobbies200JSONResponseBodyStatus defines parameters for ListLobbies.
+type ListLobbies200JSONResponseBodyStatus string
+
+// CreateLobbyJSONBody defines parameters for CreateLobby.
+type CreateLobbyJSONBody = map[string]interface{}
+
+// JoinLobbyByCodeJSONBody defines parameters for JoinLobbyByCode.
+type JoinLobbyByCodeJSONBody struct {
+	Code string `json:"code"`
+}
+
+// GetLobby200JSONResponseBodyStatus defines parameters for GetLobby.
+type GetLobby200JSONResponseBodyStatus string
+
+// JoinMatchmaking200JSONResponseBodyStatus defines parameters for JoinMatchmaking.
+type JoinMatchmaking200JSONResponseBodyStatus string
+
+// GetMatchmakingStatus200JSONResponseBodyStatus defines parameters for GetMatchmakingStatus.
+type GetMatchmakingStatus200JSONResponseBodyStatus string
+
+// UpdateProfileJSONBody defines parameters for UpdateProfile.
+type UpdateProfileJSONBody struct {
+	Username string `json:"username"`
+}
+
+// ChangePasswordJSONBody defines parameters for ChangePassword.
+type ChangePasswordJSONBody struct {
+	NewPassword string `json:"new_password"`
+	OldPassword string `json:"old_password"`
+}
+
 // Authenticate2FAJSONRequestBody defines body for Authenticate2FA for application/json ContentType.
 type Authenticate2FAJSONRequestBody Authenticate2FAJSONBody
 
@@ -67,11 +610,32 @@ type LoginJSONRequestBody LoginJSONBody
 // RegisterJSONRequestBody defines body for Register for application/json ContentType.
 type RegisterJSONRequestBody RegisterJSONBody
 
+// MakeMoveJSONRequestBody defines body for MakeMove for application/json ContentType.
+type MakeMoveJSONRequestBody MakeMoveJSONBody
+
+// PlaceShipsJSONRequestBody defines body for PlaceShips for application/json ContentType.
+type PlaceShipsJSONRequestBody PlaceShipsJSONBody
+
+// CreateLobbyJSONRequestBody defines body for CreateLobby for application/json ContentType.
+type CreateLobbyJSONRequestBody = CreateLobbyJSONBody
+
+// JoinLobbyByCodeJSONRequestBody defines body for JoinLobbyByCode for application/json ContentType.
+type JoinLobbyByCodeJSONRequestBody JoinLobbyByCodeJSONBody
+
+// UpdateProfileJSONRequestBody defines body for UpdateProfile for application/json ContentType.
+type UpdateProfileJSONRequestBody UpdateProfileJSONBody
+
+// ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
+type ChangePasswordJSONRequestBody ChangePasswordJSONBody
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Подтвердить 2FA код и получить JWT
 	// (POST /auth/2fa/authenticate)
 	Authenticate2FA(w http.ResponseWriter, r *http.Request)
+	// Отключить 2FA
+	// (POST /auth/2fa/disable)
+	Disable2FA(w http.ResponseWriter, r *http.Request)
 	// Начать настройку 2FA (отправляет код на email)
 	// (POST /auth/2fa/setup)
 	Setup2FA(w http.ResponseWriter, r *http.Request)
@@ -84,6 +648,90 @@ type ServerInterface interface {
 	// Регистрация нового пользователя
 	// (POST /auth/register)
 	Register(w http.ResponseWriter, r *http.Request)
+	// Список доступных игр
+	// (GET /games)
+	ListGames(w http.ResponseWriter, r *http.Request)
+	// Создать новую игру
+	// (POST /games)
+	CreateGame(w http.ResponseWriter, r *http.Request)
+	// Список активных игр текущего игрока (для reconnect)
+	// (GET /games/active)
+	GetActiveGames(w http.ResponseWriter, r *http.Request)
+	// История завершённых игр
+	// (GET /games/history)
+	GetGameHistory(w http.ResponseWriter, r *http.Request, params GetGameHistoryParams)
+	// Получить текущее состояние игры
+	// (GET /games/{gameId})
+	GetGameState(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID)
+	// Сдаться (техническое поражение)
+	// (POST /games/{gameId}/forfeit)
+	ForfeitGame(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID)
+	// Сделать ход
+	// (POST /games/{gameId}/move)
+	MakeMove(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID)
+	// Запросить реванш
+	// (POST /games/{gameId}/rematch)
+	RequestRematch(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID)
+	// Полные данные для реплея (начальные позиции + все ходы)
+	// (GET /games/{gameId}/replay)
+	GetGameReplay(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID)
+	// Получить результаты завершённой игры
+	// (GET /games/{gameId}/result)
+	GetGameResult(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID)
+	// Расставить корабли
+	// (POST /games/{gameId}/ships)
+	PlaceShips(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID)
+	// Подтвердить готовность (расстановка завершена)
+	// (POST /games/{gameId}/ships/confirm)
+	ConfirmShips(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID)
+	// Расставить корабли случайным образом
+	// (POST /games/{gameId}/ships/random)
+	PlaceShipsRandom(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID)
+	// Сбросить расстановку и готовность (вернуться к редактированию)
+	// (POST /games/{gameId}/ships/reset)
+	ResetShips(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID)
+	// Получить таблицу лидеров
+	// (GET /leaderboard)
+	GetLeaderboard(w http.ResponseWriter, r *http.Request, params GetLeaderboardParams)
+	// Список доступных лобби
+	// (GET /lobbies)
+	ListLobbies(w http.ResponseWriter, r *http.Request, params ListLobbiesParams)
+	// Создать новое лобби
+	// (POST /lobbies)
+	CreateLobby(w http.ResponseWriter, r *http.Request)
+	// Присоединиться к лобби по коду-приглашению
+	// (POST /lobbies/join-by-code)
+	JoinLobbyByCode(w http.ResponseWriter, r *http.Request)
+	// Удалить лобби (только создатель)
+	// (DELETE /lobbies/{lobbyId})
+	DeleteLobby(w http.ResponseWriter, r *http.Request, lobbyId openapi_types.UUID)
+	// Получить информацию о лобби (включая код-приглашение для создателя)
+	// (GET /lobbies/{lobbyId})
+	GetLobby(w http.ResponseWriter, r *http.Request, lobbyId openapi_types.UUID)
+	// Присоединиться к лобби по ID
+	// (POST /lobbies/{lobbyId}/join)
+	JoinLobby(w http.ResponseWriter, r *http.Request, lobbyId openapi_types.UUID)
+	// Покинуть лобби
+	// (POST /lobbies/{lobbyId}/leave)
+	LeaveLobby(w http.ResponseWriter, r *http.Request, lobbyId openapi_types.UUID)
+	// Покинуть очередь быстрой игры
+	// (DELETE /matchmaking/quick)
+	LeaveMatchmaking(w http.ResponseWriter, r *http.Request)
+	// Встать в очередь быстрой игры
+	// (POST /matchmaking/quick)
+	JoinMatchmaking(w http.ResponseWriter, r *http.Request)
+	// Проверить статус поиска (polling)
+	// (GET /matchmaking/status)
+	GetMatchmakingStatus(w http.ResponseWriter, r *http.Request)
+	// Получить профиль и статистику текущего пользователя
+	// (GET /profile)
+	GetProfile(w http.ResponseWriter, r *http.Request)
+	// Изменить никнейм
+	// (PATCH /profile)
+	UpdateProfile(w http.ResponseWriter, r *http.Request)
+	// Изменить пароль
+	// (PUT /profile/password)
+	ChangePassword(w http.ResponseWriter, r *http.Request)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -93,6 +741,12 @@ type Unimplemented struct{}
 // Подтвердить 2FA код и получить JWT
 // (POST /auth/2fa/authenticate)
 func (_ Unimplemented) Authenticate2FA(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Отключить 2FA
+// (POST /auth/2fa/disable)
+func (_ Unimplemented) Disable2FA(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -120,6 +774,174 @@ func (_ Unimplemented) Register(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Список доступных игр
+// (GET /games)
+func (_ Unimplemented) ListGames(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Создать новую игру
+// (POST /games)
+func (_ Unimplemented) CreateGame(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Список активных игр текущего игрока (для reconnect)
+// (GET /games/active)
+func (_ Unimplemented) GetActiveGames(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// История завершённых игр
+// (GET /games/history)
+func (_ Unimplemented) GetGameHistory(w http.ResponseWriter, r *http.Request, params GetGameHistoryParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Получить текущее состояние игры
+// (GET /games/{gameId})
+func (_ Unimplemented) GetGameState(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Сдаться (техническое поражение)
+// (POST /games/{gameId}/forfeit)
+func (_ Unimplemented) ForfeitGame(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Сделать ход
+// (POST /games/{gameId}/move)
+func (_ Unimplemented) MakeMove(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Запросить реванш
+// (POST /games/{gameId}/rematch)
+func (_ Unimplemented) RequestRematch(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Полные данные для реплея (начальные позиции + все ходы)
+// (GET /games/{gameId}/replay)
+func (_ Unimplemented) GetGameReplay(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Получить результаты завершённой игры
+// (GET /games/{gameId}/result)
+func (_ Unimplemented) GetGameResult(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Расставить корабли
+// (POST /games/{gameId}/ships)
+func (_ Unimplemented) PlaceShips(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Подтвердить готовность (расстановка завершена)
+// (POST /games/{gameId}/ships/confirm)
+func (_ Unimplemented) ConfirmShips(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Расставить корабли случайным образом
+// (POST /games/{gameId}/ships/random)
+func (_ Unimplemented) PlaceShipsRandom(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Сбросить расстановку и готовность (вернуться к редактированию)
+// (POST /games/{gameId}/ships/reset)
+func (_ Unimplemented) ResetShips(w http.ResponseWriter, r *http.Request, gameId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Получить таблицу лидеров
+// (GET /leaderboard)
+func (_ Unimplemented) GetLeaderboard(w http.ResponseWriter, r *http.Request, params GetLeaderboardParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Список доступных лобби
+// (GET /lobbies)
+func (_ Unimplemented) ListLobbies(w http.ResponseWriter, r *http.Request, params ListLobbiesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Создать новое лобби
+// (POST /lobbies)
+func (_ Unimplemented) CreateLobby(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Присоединиться к лобби по коду-приглашению
+// (POST /lobbies/join-by-code)
+func (_ Unimplemented) JoinLobbyByCode(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Удалить лобби (только создатель)
+// (DELETE /lobbies/{lobbyId})
+func (_ Unimplemented) DeleteLobby(w http.ResponseWriter, r *http.Request, lobbyId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Получить информацию о лобби (включая код-приглашение для создателя)
+// (GET /lobbies/{lobbyId})
+func (_ Unimplemented) GetLobby(w http.ResponseWriter, r *http.Request, lobbyId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Присоединиться к лобби по ID
+// (POST /lobbies/{lobbyId}/join)
+func (_ Unimplemented) JoinLobby(w http.ResponseWriter, r *http.Request, lobbyId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Покинуть лобби
+// (POST /lobbies/{lobbyId}/leave)
+func (_ Unimplemented) LeaveLobby(w http.ResponseWriter, r *http.Request, lobbyId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Покинуть очередь быстрой игры
+// (DELETE /matchmaking/quick)
+func (_ Unimplemented) LeaveMatchmaking(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Встать в очередь быстрой игры
+// (POST /matchmaking/quick)
+func (_ Unimplemented) JoinMatchmaking(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Проверить статус поиска (polling)
+// (GET /matchmaking/status)
+func (_ Unimplemented) GetMatchmakingStatus(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Получить профиль и статистику текущего пользователя
+// (GET /profile)
+func (_ Unimplemented) GetProfile(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Изменить никнейм
+// (PATCH /profile)
+func (_ Unimplemented) UpdateProfile(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Изменить пароль
+// (PUT /profile/password)
+func (_ Unimplemented) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ServerInterfaceWrapper converts contexts to parameters.
 type ServerInterfaceWrapper struct {
 	Handler            ServerInterface
@@ -134,6 +956,26 @@ func (siw *ServerInterfaceWrapper) Authenticate2FA(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Authenticate2FA(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Disable2FA operation middleware
+func (siw *ServerInterfaceWrapper) Disable2FA(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Disable2FA(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -202,6 +1044,856 @@ func (siw *ServerInterfaceWrapper) Register(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Register(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListGames operation middleware
+func (siw *ServerInterfaceWrapper) ListGames(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListGames(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateGame operation middleware
+func (siw *ServerInterfaceWrapper) CreateGame(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateGame(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetActiveGames operation middleware
+func (siw *ServerInterfaceWrapper) GetActiveGames(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetActiveGames(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetGameHistory operation middleware
+func (siw *ServerInterfaceWrapper) GetGameHistory(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetGameHistoryParams
+
+	// ------------- Optional query parameter "page" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page", r.URL.Query(), &params.Page, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "opponent_username" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "opponent_username", r.URL.Query(), &params.OpponentUsername, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "opponent_username"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "opponent_username", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetGameHistory(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetGameState operation middleware
+func (siw *ServerInterfaceWrapper) GetGameState(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gameId" -------------
+	var gameId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gameId", chi.URLParam(r, "gameId"), &gameId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gameId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetGameState(w, r, gameId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ForfeitGame operation middleware
+func (siw *ServerInterfaceWrapper) ForfeitGame(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gameId" -------------
+	var gameId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gameId", chi.URLParam(r, "gameId"), &gameId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gameId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ForfeitGame(w, r, gameId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MakeMove operation middleware
+func (siw *ServerInterfaceWrapper) MakeMove(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gameId" -------------
+	var gameId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gameId", chi.URLParam(r, "gameId"), &gameId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gameId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MakeMove(w, r, gameId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RequestRematch operation middleware
+func (siw *ServerInterfaceWrapper) RequestRematch(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gameId" -------------
+	var gameId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gameId", chi.URLParam(r, "gameId"), &gameId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gameId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RequestRematch(w, r, gameId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetGameReplay operation middleware
+func (siw *ServerInterfaceWrapper) GetGameReplay(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gameId" -------------
+	var gameId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gameId", chi.URLParam(r, "gameId"), &gameId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gameId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetGameReplay(w, r, gameId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetGameResult operation middleware
+func (siw *ServerInterfaceWrapper) GetGameResult(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gameId" -------------
+	var gameId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gameId", chi.URLParam(r, "gameId"), &gameId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gameId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetGameResult(w, r, gameId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PlaceShips operation middleware
+func (siw *ServerInterfaceWrapper) PlaceShips(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gameId" -------------
+	var gameId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gameId", chi.URLParam(r, "gameId"), &gameId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gameId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PlaceShips(w, r, gameId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ConfirmShips operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmShips(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gameId" -------------
+	var gameId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gameId", chi.URLParam(r, "gameId"), &gameId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gameId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ConfirmShips(w, r, gameId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PlaceShipsRandom operation middleware
+func (siw *ServerInterfaceWrapper) PlaceShipsRandom(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gameId" -------------
+	var gameId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gameId", chi.URLParam(r, "gameId"), &gameId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gameId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PlaceShipsRandom(w, r, gameId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResetShips operation middleware
+func (siw *ServerInterfaceWrapper) ResetShips(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gameId" -------------
+	var gameId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gameId", chi.URLParam(r, "gameId"), &gameId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gameId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResetShips(w, r, gameId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetLeaderboard operation middleware
+func (siw *ServerInterfaceWrapper) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetLeaderboardParams
+
+	// ------------- Optional query parameter "sort_by" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "sort_by", r.URL.Query(), &params.SortBy, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "sort_by"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sort_by", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetLeaderboard(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListLobbies operation middleware
+func (siw *ServerInterfaceWrapper) ListLobbies(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListLobbiesParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "page" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page", r.URL.Query(), &params.Page, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListLobbies(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateLobby operation middleware
+func (siw *ServerInterfaceWrapper) CreateLobby(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateLobby(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// JoinLobbyByCode operation middleware
+func (siw *ServerInterfaceWrapper) JoinLobbyByCode(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.JoinLobbyByCode(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteLobby operation middleware
+func (siw *ServerInterfaceWrapper) DeleteLobby(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "lobbyId" -------------
+	var lobbyId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "lobbyId", chi.URLParam(r, "lobbyId"), &lobbyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lobbyId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteLobby(w, r, lobbyId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetLobby operation middleware
+func (siw *ServerInterfaceWrapper) GetLobby(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "lobbyId" -------------
+	var lobbyId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "lobbyId", chi.URLParam(r, "lobbyId"), &lobbyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lobbyId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetLobby(w, r, lobbyId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// JoinLobby operation middleware
+func (siw *ServerInterfaceWrapper) JoinLobby(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "lobbyId" -------------
+	var lobbyId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "lobbyId", chi.URLParam(r, "lobbyId"), &lobbyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lobbyId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.JoinLobby(w, r, lobbyId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// LeaveLobby operation middleware
+func (siw *ServerInterfaceWrapper) LeaveLobby(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "lobbyId" -------------
+	var lobbyId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "lobbyId", chi.URLParam(r, "lobbyId"), &lobbyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lobbyId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.LeaveLobby(w, r, lobbyId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// LeaveMatchmaking operation middleware
+func (siw *ServerInterfaceWrapper) LeaveMatchmaking(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.LeaveMatchmaking(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// JoinMatchmaking operation middleware
+func (siw *ServerInterfaceWrapper) JoinMatchmaking(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.JoinMatchmaking(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMatchmakingStatus operation middleware
+func (siw *ServerInterfaceWrapper) GetMatchmakingStatus(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMatchmakingStatus(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetProfile operation middleware
+func (siw *ServerInterfaceWrapper) GetProfile(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProfile(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateProfile operation middleware
+func (siw *ServerInterfaceWrapper) UpdateProfile(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateProfile(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ChangePassword operation middleware
+func (siw *ServerInterfaceWrapper) ChangePassword(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ChangePassword(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -328,6 +2020,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/auth/2fa/authenticate", wrapper.Authenticate2FA)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/auth/2fa/disable", wrapper.Disable2FA)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/2fa/setup", wrapper.Setup2FA)
 	})
 	r.Group(func(r chi.Router) {
@@ -339,6 +2034,90 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/register", wrapper.Register)
 	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/games", wrapper.ListGames)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/games", wrapper.CreateGame)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/games/active", wrapper.GetActiveGames)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/games/history", wrapper.GetGameHistory)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/games/{gameId}", wrapper.GetGameState)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/games/{gameId}/forfeit", wrapper.ForfeitGame)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/games/{gameId}/move", wrapper.MakeMove)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/games/{gameId}/rematch", wrapper.RequestRematch)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/games/{gameId}/replay", wrapper.GetGameReplay)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/games/{gameId}/result", wrapper.GetGameResult)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/games/{gameId}/ships", wrapper.PlaceShips)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/games/{gameId}/ships/confirm", wrapper.ConfirmShips)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/games/{gameId}/ships/random", wrapper.PlaceShipsRandom)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/games/{gameId}/ships/reset", wrapper.ResetShips)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/leaderboard", wrapper.GetLeaderboard)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/lobbies", wrapper.ListLobbies)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/lobbies", wrapper.CreateLobby)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/lobbies/join-by-code", wrapper.JoinLobbyByCode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/lobbies/{lobbyId}", wrapper.DeleteLobby)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/lobbies/{lobbyId}", wrapper.GetLobby)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/lobbies/{lobbyId}/join", wrapper.JoinLobby)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/lobbies/{lobbyId}/leave", wrapper.LeaveLobby)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/matchmaking/quick", wrapper.LeaveMatchmaking)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/matchmaking/quick", wrapper.JoinMatchmaking)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/matchmaking/status", wrapper.GetMatchmakingStatus)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/profile", wrapper.GetProfile)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/profile", wrapper.UpdateProfile)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/profile/password", wrapper.ChangePassword)
+	})
 
 	return r
 }
@@ -348,25 +2127,87 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"1FbdThtHFH6V0VyBtALj0Cj1HVwgpcpFVar2AqFqYw+wKfvTmXFahCzZ67SkAhWl6lWlJFX7AsuGLYsN",
-	"yyuc80bVmVmDMTYkLm3VK3t2fs7P953znV1eD/0oDESgFa/tciXqTenpndX6lvCF+bQsXCnkUlNv0eqp",
-	"Wa2E0nc1r/FPvvycO1yZ07xW7nKH652I1ltaR7zVajncCzZCuq89vU07q8Jly67W24ItffqYO/y5kMoL",
-	"A17jC3OVuQpvOTyMROBGHq/xB3OVuQfc4ZGrt4xT825Tb81XN1zzRwTaq7ta0E4UKk2/YSSkq70weNzg",
-	"Nb40dKq6ssQdLsU3TaH0ctjYoeP1MNAiMDfdKNqmg14YzD9T5NKujdA170t6WXs2OfWwYayW8SotvWCT",
-	"fNfCj77S4dciGLPdsuY9KRq8tjZ81rEvrl9mMHz6TNS1zeHVHS2bwnxQURgo60q1Uvkbgdzi6hhPGkLV",
-	"pRdpCxj8gR24gAxfwjkkeMggwS7GkME5xpDjC8ihBwn+ADkeOgxS3IdjSOCcEX1aDl+sLJDpkVdfQwYp",
-	"ZNiGc9yHUwY9KOCYQQ59yBnk2MEYX0GPYQfbUECPDSWSvFRN33flDr31lq5iXL53DDnGeMCqK0tXrzK4",
-	"gAL62MW9ctt413KGyKaEbkaTWbZK2wN63Rs0vlDK3RTTgvOrja/AGC6wDQmk0CdoGIHFhO9627diwOgK",
-	"xlBgG3I4gQJSws7e+fjmHUoqduFPuplCD/r4E+6RQUgsKmWL4bW1681lbb21fg2015DgHiQGC8MsApyQ",
-	"PoUedg16M9fjwkPIML7E9DLA2REcnwvpbexMBvILs/8vNIqRTvAfFb/Srm6qKQlmiiiBHpU6pJAbhAxF",
-	"CHAiSeWDixtfGLqdEfjTkfODiDa+O5QuYcdyyLSIMXEOOskQxbbDTS+YzK4nZvu+mBW5Sn0bysZYGWoq",
-	"IQPXfw/qXZ50rl78/8qQ5VSK3xsIZ+AIMjghlGYpK9VK9R/px3fL/t1B/I5tyOAIu9TJsIOHllvvJ5IZ",
-	"I/nCVxiXS6uzdjGqiT+X2YGUYcfKKWRwht0hJkux6Skt5GQyfzY4cV98top0M9JfSJ1JVki6jnD/skax",
-	"bVLWK4M+LTXN4RuDKXXw4QZcw7UzYu4NxuwR5a9g1YpJEJxBanwoIOUO993vnohgkxpKteJw3wsGy0fO",
-	"7YU4xtKitbTw8A5LCw+vWVp0pqhqp8zHdNU9joRvzeB0MOi/hkd9PCAyXg2GBYVWwIml5JAyTMsTKUM5",
-	"bZW9wZeQwxGNpcxIRh9ycoxmVMjZDBybLzRAGDhofMnn4QIS0/b7Zo69oPhIfAacc2jkuK5rw0o2O3Fm",
-	"mpzBDsOYVIe8uHIlswuSSqtN5cCFHezij5AZt1LbQ8joR2M1eDgJ2DFOW9eT0VbxG2Twrpy424NJnoIt",
-	"DFHfQTGYnkdDOKT0t/4KAAD//w==",
+	"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",
+	"UlyhhN0orNv/FwAA//8=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
