@@ -1,0 +1,16 @@
+type: object
+properties:
+  hit:
+    type: boolean
+  ship_sunk:
+    type: boolean
+  game_over:
+    type: boolean
+  winner_id:
+    type: string
+    format: uuid
+    nullable: true
+required:
+  - hit
+  - ship_sunk
+  - game_over

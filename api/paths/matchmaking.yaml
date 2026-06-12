@@ -1,0 +1,41 @@
+post:
+  operationId: joinMatchmaking
+  summary: Встать в очередь быстрой игры
+  security:
+    - BearerAuth: []
+  responses:
+    '200':
+      description: В очереди
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status:
+                type: string
+                enum:
+                  - searching
+    '401':
+      description: Не авторизован
+    '409':
+      description: Уже в очереди
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml
+delete:
+  operationId: leaveMatchmaking
+  summary: Покинуть очередь быстрой игры
+  security:
+    - BearerAuth: []
+  responses:
+    '200':
+      description: Вышли из очереди
+    '401':
+      description: Не авторизован
+    '409':
+      description: Не были в очереди
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml

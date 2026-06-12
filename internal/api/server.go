@@ -40,6 +40,7 @@ type otpEntry struct {
 }
 
 type Server struct {
+	Unimplemented
 	DB     *db.Queries
 	SMTP   SMTPConfig
 	JWTKey []byte

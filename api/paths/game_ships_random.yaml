@@ -1,0 +1,46 @@
+post:
+  operationId: placeShipsRandom
+  summary: Расставить корабли случайным образом
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: gameId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    '200':
+      description: Корабли расставлены случайно
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              ships:
+                type: array
+                items:
+                  $ref: ../components/schemas/Ship.yaml
+              message:
+                type: string
+    '400':
+      description: Игра не в фазе расстановки
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml
+    '401':
+      description: Не авторизован
+    '403':
+      description: Вы не участник этой игры
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml
+    '404':
+      description: Игра не найдена
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml

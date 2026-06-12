@@ -1,0 +1,56 @@
+get:
+  operationId: getProfile
+  summary: Получить профиль и статистику текущего пользователя
+  security:
+    - BearerAuth: []
+  responses:
+    '200':
+      description: Профиль пользователя
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Profile.yaml
+    '401':
+      description: Не авторизован
+patch:
+  operationId: updateProfile
+  summary: Изменить никнейм
+  security:
+    - BearerAuth: []
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            username:
+              type: string
+              minLength: 4
+              maxLength: 16
+          required:
+            - username
+  responses:
+    '200':
+      description: Никнейм изменён
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              username:
+                type: string
+    '400':
+      description: Некорректная длина никнейма
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml
+    '401':
+      description: Не авторизован
+    '409':
+      description: Никнейм уже занят
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml

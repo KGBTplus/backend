@@ -1,0 +1,38 @@
+post:
+  operationId: joinLobbyByCode
+  summary: Присоединиться к лобби по коду-приглашению
+  security:
+    - BearerAuth: []
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/JoinByCodeRequest.yaml
+  responses:
+    '200':
+      description: Успешно присоединились
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+              lobby_id:
+                type: string
+                format: uuid
+    '400':
+      description: Неверный код
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml
+    '401':
+      description: Не авторизован
+    '404':
+      description: Лобби с таким кодом не найдено
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml

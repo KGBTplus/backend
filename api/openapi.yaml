@@ -2,6 +2,16 @@ openapi: 3.0.3
 info:
   title: Sea Battle API
   version: 1.0.0
+  description: |
+    REST API для игры «Морской бой».
+
+    ## WebSocket
+
+    Помимо REST, сервер поддерживает WebSocket для событий реального времени.
+
+    **Подключение:** `ws://localhost:8080/ws?token=<JWT>`
+
+    Полный список событий описан в [ws.yaml](paths/ws.yaml).
 paths:
   /auth/login:
     $ref: paths/auth_login.yaml
@@ -11,32 +21,94 @@ paths:
     $ref: paths/auth_2fa_setup.yaml
   /auth/2fa/verify:
     $ref: paths/auth_2fa_verify.yaml
+  /auth/2fa/disable:
+    $ref: paths/auth_2fa_disable.yaml
   /auth/2fa/authenticate:
     $ref: paths/auth_2fa_authenticate.yaml
   /profile:
-    $ref: paths/profile_get.yaml
+    $ref: paths/profile.yaml
+  /profile/password:
+    $ref: paths/profile_password.yaml
+  /lobbies:
+    $ref: paths/lobbies.yaml
+  /lobbies/{lobbyId}:
+    $ref: paths/lobby.yaml
+  /lobbies/{lobbyId}/join:
+    $ref: paths/lobby_join.yaml
+  /lobbies/{lobbyId}/leave:
+    $ref: paths/lobby_leave.yaml
+  /lobbies/join-by-code:
+    $ref: paths/lobby_join_code.yaml
+  /matchmaking/quick:
+    $ref: paths/matchmaking.yaml
+  /matchmaking/status:
+    $ref: paths/matchmaking_status.yaml
   /games:
     $ref: paths/games.yaml
+  /games/active:
+    $ref: paths/game_active.yaml
+  /games/history:
+    $ref: paths/game_history.yaml
   /games/{gameId}:
-    $ref: paths/game_get.yaml
-  /games/{gameId}/join:
-    $ref: paths/game_join.yaml
-  /games/{gameId}/ships:
-    $ref: paths/game_ships.yaml
+    $ref: paths/game.yaml
   /games/{gameId}/move:
     $ref: paths/game_move.yaml
+  /games/{gameId}/ships:
+    $ref: paths/game_ships.yaml
+  /games/{gameId}/ships/random:
+    $ref: paths/game_ships_random.yaml
+  /games/{gameId}/ships/confirm:
+    $ref: paths/game_ships_confirm.yaml
+  /games/{gameId}/ships/reset:
+    $ref: paths/game_ships_reset.yaml
+  /games/{gameId}/forfeit:
+    $ref: paths/game_forfeit.yaml
+  /games/{gameId}/result:
+    $ref: paths/game_result.yaml
+  /games/{gameId}/rematch:
+    $ref: paths/game_rematch.yaml
+  /games/{gameId}/replay:
+    $ref: paths/game_replay.yaml
+  /leaderboard:
+    $ref: paths/leaderboard.yaml
 components:
   schemas:
     User:
       $ref: components/schemas/User.yaml
+    Error:
+      $ref: components/schemas/Error.yaml
     Profile:
       $ref: components/schemas/Profile.yaml
-    Game:
-      $ref: components/schemas/Game.yaml
+    Lobby:
+      $ref: components/schemas/Lobby.yaml
+    CreateLobbyRequest:
+      $ref: components/schemas/CreateLobbyRequest.yaml
+    CreateLobbyResponse:
+      $ref: components/schemas/CreateLobbyResponse.yaml
+    JoinByCodeRequest:
+      $ref: components/schemas/JoinByCodeRequest.yaml
+    GameState:
+      $ref: components/schemas/GameState.yaml
+    MoveRequest:
+      $ref: components/schemas/MoveRequest.yaml
+    MoveResponse:
+      $ref: components/schemas/MoveResponse.yaml
     Ship:
       $ref: components/schemas/Ship.yaml
     Move:
       $ref: components/schemas/Move.yaml
+    GameResult:
+      $ref: components/schemas/GameResult.yaml
+    MatchmakingStatus:
+      $ref: components/schemas/MatchmakingStatus.yaml
+    GameHistoryEntry:
+      $ref: components/schemas/GameHistoryEntry.yaml
+    GameReplay:
+      $ref: components/schemas/GameReplay.yaml
+    LeaderboardEntry:
+      $ref: components/schemas/LeaderboardEntry.yaml
+    LeaderboardResponse:
+      $ref: components/schemas/LeaderboardResponse.yaml
   securitySchemes:
     BearerAuth:
       type: http
