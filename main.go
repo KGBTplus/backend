@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/KGBTplus/backend/internal/api"
 	"github.com/KGBTplus/backend/internal/db"
@@ -49,6 +50,16 @@ func main() {
 
 	queries := db.New(dbConn)
 
+	// Подождём, пока БД станет доступна (на случай задержки DNS/стартов контейнеров)
+	maxAttempts := 30
+	for i := 0; i < maxAttempts; i++ {
+		if err := dbConn.Ping(); err == nil {
+			break
+		}
+		log.Printf("Ожидание БД (%d/%d): %v", i+1, maxAttempts, dbConn.Ping())
+		time.Sleep(2 * time.Second)
+	}
+
 	runMigrations(dbConn)
 
 	// 2. SMTP конфигурация (можно не заполнять — код будет печататься в лог)
@@ -73,6 +84,21 @@ func main() {
 	}))
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	
+	// CORS middleware
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Max-Age", "86400")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
 
 	r.Get("/swagger/*", httpSwagger.Handler(
 		httpSwagger.URL("/swagger/doc.json"),
