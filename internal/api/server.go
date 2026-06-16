@@ -801,9 +801,9 @@ func (s *Server) GetGameReplay(w http.ResponseWriter, r *http.Request, gameID op
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"game_id":     game.ID,
-		"player1_id":  game.Player1ID,
-		"player2_id":  game.Player2ID,
+		"game_id":    game.ID,
+		"player1_id": game.Player1ID,
+		"player2_id": game.Player2ID,
 		"initial_board": map[string]interface{}{
 			"player1_ships": s.Games.PlayerShips(game, game.Player1ID),
 			"player2_ships": nil,
