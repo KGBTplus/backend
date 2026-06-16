@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"net/http"
 	"net/smtp"
@@ -41,12 +42,13 @@ type otpEntry struct {
 
 type Server struct {
 	Unimplemented
-	DB     *db.Queries
-	SMTP   SMTPConfig
-	JWTKey []byte
-	Games  *GameStore
-	mu     sync.Mutex
-	codes  map[string]otpEntry
+	DB          *db.Queries
+	SMTP        SMTPConfig
+	JWTKey      []byte
+	Games       *GameStore
+	ArcadeGames *ArcadeStore
+	mu          sync.Mutex
+	codes       map[string]otpEntry
 }
 
 func NewServer(db *db.Queries, smtp SMTPConfig, jwtSecret string) *Server {
@@ -55,11 +57,12 @@ func NewServer(db *db.Queries, smtp SMTPConfig, jwtSecret string) *Server {
 		key = []byte("my_secret_key")
 	}
 	return &Server{
-		DB:     db,
-		SMTP:   smtp,
-		JWTKey: key,
-		Games:  NewGameStore(),
-		codes:  make(map[string]otpEntry),
+		DB:          db,
+		SMTP:        smtp,
+		JWTKey:      key,
+		Games:       NewGameStore(),
+		ArcadeGames: NewArcadeStore(),
+		codes:       make(map[string]otpEntry),
 	}
 }
 
@@ -670,6 +673,20 @@ func (s *Server) GetGameState(w http.ResponseWriter, r *http.Request, gameID ope
 	json.NewEncoder(w).Encode(game)
 }
 
+func (s *Server) StartBotGame(w http.ResponseWriter, r *http.Request) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	game := s.Games.CreateBotGame(userID)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(game)
+}
+
 func (s *Server) ForfeitGame(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
 	userID, err := s.getUserIDFromToken(r)
 	if err != nil {
@@ -801,9 +818,9 @@ func (s *Server) GetGameReplay(w http.ResponseWriter, r *http.Request, gameID op
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"game_id":     game.ID,
-		"player1_id":  game.Player1ID,
-		"player2_id":  game.Player2ID,
+		"game_id":    game.ID,
+		"player1_id": game.Player1ID,
+		"player2_id": game.Player2ID,
 		"initial_board": map[string]interface{}{
 			"player1_ships": s.Games.PlayerShips(game, game.Player1ID),
 			"player2_ships": nil,
@@ -1552,4 +1569,55 @@ func generateSimpleShips(rng *rand.Rand) []Ship {
 		}
 	}
 	return result
+}
+
+// ---------- Аркадный режим (Морской бой / Торпедная атака) ----------
+
+func (s *Server) StartArcade(w http.ResponseWriter, r *http.Request) {
+	sess := s.ArcadeGames.Create()
+
+	elapsed := time.Since(sess.StartedAt).Seconds()
+	shipX := calcShipX(sess.ShipSpeed, sess.ShipPhase, elapsed)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"session_id":     sess.ID,
+		"score":          sess.Score,
+		"torpedoes_left": sess.TorpedoesLeft,
+		"ship_x":         math.Round(shipX),
+		"ship_speed":     sess.ShipSpeed,
+		"trajectories":   trajectoryX[:],
+		"travel_times":   travelTime[:],
+		"viewport_width": 1000,
+		"status":         sess.Status,
+	})
+}
+
+func (s *Server) ShootTorpedo(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SessionID  string `json:"session_id"`
+		Trajectory int    `json:"trajectory"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, http.StatusBadRequest, "Неверный формат JSON")
+		return
+	}
+
+	sess, hit, errMsg := s.ArcadeGames.Shoot(req.SessionID, req.Trajectory)
+	if errMsg != "" {
+		sendError(w, http.StatusBadRequest, errMsg)
+		return
+	}
+
+	elapsed := time.Since(sess.StartedAt).Seconds()
+	shipX := calcShipX(sess.ShipSpeed, sess.ShipPhase, elapsed)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"hit":            hit,
+		"score":          sess.Score,
+		"torpedoes_left": sess.TorpedoesLeft,
+		"ship_x":         math.Round(shipX),
+		"status":         sess.Status,
+	})
 }

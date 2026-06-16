@@ -117,6 +117,13 @@ func main() {
 	// 5. Связка с OpenAPI
 	api.HandlerFromMux(srv, r)
 
+	// 5a. Аркадный режим (без авторизации)
+	r.Post("/arcade/start", srv.StartArcade)
+	r.Post("/arcade/shoot", srv.ShootTorpedo)
+
+	// 5b. Игра против бота (требует авторизации)
+	r.Post("/games/bot/start", srv.StartBotGame)
+
 	// (Опционально) Вывод маршрутов для отладки
 	log.Println("Зарегистрированные маршруты:")
 	chi.Walk(r, func(method string, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {

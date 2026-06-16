@@ -1,11 +1,14 @@
 package api
 
 import (
+	"math/rand"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+var BotID = uuid.MustParse("00000000-0000-0000-0000-0000000000b0t")
 
 type Cell struct {
 	X   int  `json:"x"`
@@ -99,8 +102,26 @@ func (gs *GameStore) Join(gameID, playerID uuid.UUID) bool {
 	}
 	g.Player2ID = &playerID
 	g.Status = "placing_ships"
-	g.CurrentTurn = &g.Player1ID
 	return true
+}
+
+func (gs *GameStore) CreateBotGame(playerID uuid.UUID) *GameRoom {
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	botShips := generateRandomShipSet(rng, BotID)
+
+	g := &GameRoom{
+		ID:        uuid.New(),
+		Player1ID: playerID,
+		Player2ID: &BotID,
+		Status:    "placing_ships",
+		Ships:     botShips,
+		Moves:     []Move{},
+		CreatedAt: time.Now(),
+	}
+	gs.mu.Lock()
+	gs.games[g.ID] = g
+	gs.mu.Unlock()
+	return g
 }
 
 func (gs *GameStore) PlaceShips(gameID, playerID uuid.UUID, ships []Ship) bool {
@@ -160,6 +181,9 @@ func (gs *GameStore) All() []*GameRoom {
 }
 
 func (gs *GameStore) CheckAndStart(gameID uuid.UUID) {
+	gs.mu.Lock()
+	defer gs.mu.Unlock()
+
 	g, ok := gs.games[gameID]
 	if !ok || g.Status != "placing_ships" || g.Player2ID == nil {
 		return
@@ -175,6 +199,16 @@ func (gs *GameStore) CheckAndStart(gameID uuid.UUID) {
 	}
 	if p1Ships >= 10 && p2Ships >= 10 {
 		g.Status = "playing"
+		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+		if rng.Intn(2) == 0 {
+			g.CurrentTurn = &g.Player1ID
+		} else {
+			g.CurrentTurn = g.Player2ID
+		}
+
+		if *g.CurrentTurn == BotID {
+			gs.runBotTurn(g)
+		}
 	}
 }
 
@@ -206,6 +240,53 @@ func (gs *GameStore) MakeMove(gameID, playerID uuid.UUID, x, y int) (*GameRoom, 
 		opponentID = g.Player1ID
 	}
 
+	hit := gs.recordShot(g, playerID, opponentID, x, y)
+
+	if g.Status == "finished" {
+		return g, ""
+	}
+
+	if !hit {
+		if playerID == g.Player1ID {
+			g.CurrentTurn = g.Player2ID
+		} else {
+			g.CurrentTurn = &g.Player1ID
+		}
+	}
+
+	if g.Status == "playing" && g.CurrentTurn != nil && *g.CurrentTurn == BotID {
+		gs.runBotTurn(g)
+	}
+
+	return g, ""
+}
+
+func buildCells(startX, startY, shipType int, horizontal bool) []Cell {
+	cells := make([]Cell, shipType)
+	for i := 0; i < shipType; i++ {
+		x := startX
+		y := startY
+		if horizontal {
+			x += i
+		} else {
+			y += i
+		}
+		cells[i] = Cell{X: x, Y: y, Hit: false}
+	}
+	return cells
+}
+
+func (gs *GameStore) PlayerShips(g *GameRoom, playerID uuid.UUID) []Ship {
+	var result []Ship
+	for _, s := range g.Ships {
+		if s.PlayerID == playerID {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+func (gs *GameStore) recordShot(g *GameRoom, shooterID, opponentID uuid.UUID, x, y int) bool {
 	hit := false
 	var sunkShipID *uuid.UUID
 
@@ -238,61 +319,184 @@ func (gs *GameStore) MakeMove(gameID, playerID uuid.UUID, x, y int) (*GameRoom, 
 		}
 	}
 
-	move := Move{
+	g.Moves = append(g.Moves, Move{
 		ID:         uuid.New(),
-		PlayerID:   playerID,
+		PlayerID:   shooterID,
 		X:          x,
 		Y:          y,
 		Hit:        hit,
 		SunkShipID: sunkShipID,
-	}
-	g.Moves = append(g.Moves, move)
+	})
 
-	allSunk := true
-	for _, s := range g.Ships {
-		if s.PlayerID == opponentID && !s.Sunk {
-			allSunk = false
+	if hit {
+		allSunk := true
+		for _, s := range g.Ships {
+			if s.PlayerID == opponentID && !s.Sunk {
+				allSunk = false
+				break
+			}
+		}
+		if allSunk {
+			g.Status = "finished"
+			g.WinnerID = &shooterID
+		}
+	}
+
+	return hit
+}
+
+func (gs *GameStore) randomUntargetedCell(g *GameRoom, targetPlayerID uuid.UUID) (int, int, bool) {
+	var untargeted [][2]int
+	moveSet := make(map[[2]int]bool)
+	for _, m := range g.Moves {
+		moveSet[[2]int{m.X, m.Y}] = true
+	}
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 10; x++ {
+			if !moveSet[[2]int{x, y}] {
+				untargeted = append(untargeted, [2]int{x, y})
+			}
+		}
+	}
+	if len(untargeted) == 0 {
+		return 0, 0, false
+	}
+	cell := untargeted[rand.Intn(len(untargeted))]
+	return cell[0], cell[1], true
+}
+
+func (gs *GameStore) runBotTurn(g *GameRoom) {
+	for {
+		var botID, humanID uuid.UUID
+		if g.Player1ID == BotID {
+			botID = BotID
+			humanID = *g.Player2ID
+		} else {
+			botID = *g.Player2ID
+			humanID = g.Player1ID
+		}
+
+		x, y, ok := gs.randomUntargetedCell(g, humanID)
+		if !ok {
+			break
+		}
+
+		hit := gs.recordShot(g, botID, humanID, x, y)
+
+		if g.Status == "finished" {
+			break
+		}
+
+		if !hit {
+			g.CurrentTurn = &humanID
 			break
 		}
 	}
-	if allSunk {
-		g.Status = "finished"
-		g.WinnerID = &playerID
-		return g, ""
-	}
-
-	if !hit {
-		if playerID == g.Player1ID {
-			g.CurrentTurn = g.Player2ID
-		} else {
-			g.CurrentTurn = &g.Player1ID
-		}
-	}
-
-	return g, ""
 }
 
-func buildCells(startX, startY, shipType int, horizontal bool) []Cell {
-	cells := make([]Cell, shipType)
-	for i := 0; i < shipType; i++ {
-		x := startX
-		y := startY
-		if horizontal {
-			x += i
-		} else {
-			y += i
+func generateRandomShipSet(rng *rand.Rand, playerID uuid.UUID) []Ship {
+	var ships []Ship
+	sizes := []int{4, 3, 3, 2, 2, 2, 1, 1, 1, 1}
+
+	for _, size := range sizes {
+		placed := false
+		for attempt := 0; attempt < 200; attempt++ {
+			horizontal := rng.Intn(2) == 0
+			startX := rng.Intn(10)
+			startY := rng.Intn(10)
+			if horizontal && startX+size > 10 {
+				continue
+			}
+			if !horizontal && startY+size > 10 {
+				continue
+			}
+
+			cells := buildCells(startX, startY, size, horizontal)
+			conflict := false
+			for _, existing := range ships {
+				for _, c := range cells {
+					for _, ec := range existing.Cells {
+						if absInt(c.X-ec.X) <= 1 && absInt(c.Y-ec.Y) <= 1 {
+							conflict = true
+							break
+						}
+					}
+					if conflict {
+						break
+					}
+				}
+				if conflict {
+					break
+				}
+			}
+
+			if !conflict {
+				ships = append(ships, Ship{
+					ID:         uuid.New(),
+					PlayerID:   playerID,
+					ShipType:   size,
+					StartX:     startX,
+					StartY:     startY,
+					Horizontal: horizontal,
+					Cells:      cells,
+					Sunk:       false,
+				})
+				placed = true
+				break
+			}
 		}
-		cells[i] = Cell{X: x, Y: y, Hit: false}
+
+		if !placed {
+			for y := 0; y < 10 && !placed; y++ {
+				for x := 0; x < 10 && !placed; x++ {
+					horizontal := rng.Intn(2) == 0
+					if horizontal && x+size > 10 {
+						continue
+					}
+					if !horizontal && y+size > 10 {
+						continue
+					}
+					cells := buildCells(x, y, size, horizontal)
+					conflict := false
+					for _, existing := range ships {
+						for _, c := range cells {
+							for _, ec := range existing.Cells {
+								if absInt(c.X-ec.X) <= 1 && absInt(c.Y-ec.Y) <= 1 {
+									conflict = true
+									break
+								}
+							}
+							if conflict {
+								break
+							}
+						}
+						if conflict {
+							break
+						}
+					}
+					if !conflict {
+						ships = append(ships, Ship{
+							ID:         uuid.New(),
+							PlayerID:   playerID,
+							ShipType:   size,
+							StartX:     x,
+							StartY:     y,
+							Horizontal: horizontal,
+							Cells:      cells,
+							Sunk:       false,
+						})
+						placed = true
+					}
+				}
+			}
+		}
 	}
-	return cells
+	return ships
 }
 
-func (gs *GameStore) PlayerShips(g *GameRoom, playerID uuid.UUID) []Ship {
-	var result []Ship
-	for _, s := range g.Ships {
-		if s.PlayerID == playerID {
-			result = append(result, s)
-		}
+func absInt(x int) int {
+	if x < 0 {
+		return -x
 	}
-	return result
+	return x
 }
