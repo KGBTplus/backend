@@ -111,6 +111,40 @@ func (q *Queries) GetPlayerRank(ctx context.Context, id uuid.UUID) (GetPlayerRan
 	return i, err
 }
 
+const updateProfileStats = `-- name: UpdateProfileStats :exec
+UPDATE profiles
+SET total_games = total_games + $2,
+    wins = wins + $3,
+    losses = losses + $4,
+    ships_sunk = ships_sunk + $5,
+    total_shots = total_shots + $6,
+    hits = hits + $7
+WHERE user_id = $1
+`
+
+type UpdateProfileStatsParams struct {
+	UserID       uuid.UUID
+	TotalGames   int32
+	Wins         int32
+	Losses       int32
+	ShipsSunk    int32
+	TotalShots   int32
+	Hits         int32
+}
+
+func (q *Queries) UpdateProfileStats(ctx context.Context, arg UpdateProfileStatsParams) error {
+	_, err := q.db.ExecContext(ctx, updateProfileStats,
+		arg.UserID,
+		arg.TotalGames,
+		arg.Wins,
+		arg.Losses,
+		arg.ShipsSunk,
+		arg.TotalShots,
+		arg.Hits,
+	)
+	return err
+}
+
 const getProfile = `-- name: GetProfile :one
 SELECT user_id, total_games, wins, losses, ships_sunk, total_shots, hits FROM profiles WHERE user_id = $1
 `

@@ -5,6 +5,7 @@
 package db
 
 import (
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,37 @@ type LobbyPlayer struct {
 type MatchmakingQueue struct {
 	PlayerID uuid.UUID
 	JoinedAt time.Time
+}
+
+type Game struct {
+	ID          uuid.UUID
+	Player1ID   uuid.UUID
+	Player2ID   uuid.NullUUID
+	Status      string
+	CurrentTurn uuid.NullUUID
+	WinnerID    uuid.NullUUID
+	FinishedAt  sql.NullTime
+	CreatedAt   time.Time
+}
+
+type GameShip struct {
+	ID         uuid.UUID
+	GameID     uuid.UUID
+	PlayerID   uuid.UUID
+	ShipType   int32
+	StartX     int32
+	StartY     int32
+	Horizontal bool
+}
+
+type GameMove struct {
+	ID        uuid.UUID
+	GameID    uuid.UUID
+	PlayerID  uuid.UUID
+	X         int32
+	Y         int32
+	Hit       bool
+	SunkShipID uuid.NullUUID
 }
 
 type Profile struct {

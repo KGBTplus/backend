@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"math/rand"
 	"sync"
 	"time"
 
+	"github.com/KGBTplus/backend/internal/db"
 	"github.com/google/uuid"
 )
 
@@ -51,11 +53,13 @@ type GameRoom struct {
 type GameStore struct {
 	mu    sync.RWMutex
 	games map[uuid.UUID]*GameRoom
+	db    *db.Queries
 }
 
-func NewGameStore() *GameStore {
+func NewGameStore(database *db.Queries) *GameStore {
 	return &GameStore{
 		games: make(map[uuid.UUID]*GameRoom),
+		db:    database,
 	}
 }
 
@@ -71,6 +75,15 @@ func (gs *GameStore) Create(playerID uuid.UUID) *GameRoom {
 	gs.mu.Lock()
 	gs.games[g.ID] = g
 	gs.mu.Unlock()
+
+	if gs.db != nil {
+		gs.db.CreateGame(context.Background(), db.CreateGameParams{
+			ID:        g.ID,
+			Player1ID: g.Player1ID,
+			Status:    g.Status,
+			CreatedAt: g.CreatedAt,
+		})
+	}
 	return g
 }
 
@@ -102,6 +115,13 @@ func (gs *GameStore) Join(gameID, playerID uuid.UUID) bool {
 	}
 	g.Player2ID = &playerID
 	g.Status = "placing_ships"
+
+	if gs.db != nil {
+		gs.db.UpdateGamePlayer2(context.Background(), db.UpdateGamePlayer2Params{
+			ID:        g.ID,
+			Player2ID: uuid.NullUUID{UUID: playerID, Valid: true},
+		})
+	}
 	return true
 }
 
@@ -121,6 +141,30 @@ func (gs *GameStore) CreateBotGame(playerID uuid.UUID) *GameRoom {
 	gs.mu.Lock()
 	gs.games[g.ID] = g
 	gs.mu.Unlock()
+
+	if gs.db != nil {
+		gs.db.CreateGame(context.Background(), db.CreateGameParams{
+			ID:        g.ID,
+			Player1ID: g.Player1ID,
+			Status:    g.Status,
+			CreatedAt: g.CreatedAt,
+		})
+		gs.db.UpdateGamePlayer2(context.Background(), db.UpdateGamePlayer2Params{
+			ID:        g.ID,
+			Player2ID: uuid.NullUUID{UUID: BotID, Valid: true},
+		})
+		for _, s := range g.Ships {
+			gs.db.SaveGameShip(context.Background(), db.SaveGameShipParams{
+				ID:         s.ID,
+				GameID:     g.ID,
+				PlayerID:   s.PlayerID,
+				ShipType:   int32(s.ShipType),
+				StartX:     int32(s.StartX),
+				StartY:     int32(s.StartY),
+				Horizontal: s.Horizontal,
+			})
+		}
+	}
 	return g
 }
 
@@ -146,6 +190,7 @@ func (gs *GameStore) PlaceShips(gameID, playerID uuid.UUID, ships []Ship) bool {
 	if playerShips > 0 {
 		return false
 	}
+
 	for i := range ships {
 		ships[i].ID = uuid.New()
 		ships[i].PlayerID = playerID
@@ -153,20 +198,25 @@ func (gs *GameStore) PlaceShips(gameID, playerID uuid.UUID, ships []Ship) bool {
 		ships[i].Sunk = false
 	}
 	g.Ships = append(g.Ships, ships...)
-	placedCount := 0
-	for _, s := range g.Ships {
-		if s.PlayerID == g.Player1ID {
-			placedCount++
+
+	if gs.db != nil {
+		gs.db.DeletePlayerGameShips(context.Background(), db.DeletePlayerGameShipsParams{
+			GameID:   g.ID,
+			PlayerID: playerID,
+		})
+		for _, s := range ships {
+			gs.db.SaveGameShip(context.Background(), db.SaveGameShipParams{
+				ID:         s.ID,
+				GameID:     g.ID,
+				PlayerID:   s.PlayerID,
+				ShipType:   int32(s.ShipType),
+				StartX:     int32(s.StartX),
+				StartY:     int32(s.StartY),
+				Horizontal: s.Horizontal,
+			})
 		}
 	}
-	opponentCount := 0
-	if g.Player2ID != nil && *g.Player2ID == playerID {
-		for _, s := range g.Ships {
-			if s.PlayerID == *g.Player2ID {
-				opponentCount++
-			}
-		}
-	}
+
 	return true
 }
 
@@ -206,7 +256,19 @@ func (gs *GameStore) CheckAndStart(gameID uuid.UUID) {
 			g.CurrentTurn = g.Player2ID
 		}
 
-		if *g.CurrentTurn == BotID {
+		if gs.db != nil {
+			var turnUUID uuid.NullUUID
+			if g.CurrentTurn != nil {
+				turnUUID = uuid.NullUUID{UUID: *g.CurrentTurn, Valid: true}
+			}
+			gs.db.UpdateGameStatus(context.Background(), db.UpdateGameStatusParams{
+				ID:          g.ID,
+				Status:      g.Status,
+				CurrentTurn: turnUUID,
+			})
+		}
+
+		if g.CurrentTurn != nil && *g.CurrentTurn == BotID {
 			gs.runBotTurn(g)
 		}
 	}
@@ -242,7 +304,8 @@ func (gs *GameStore) MakeMove(gameID, playerID uuid.UUID, x, y int) (*GameRoom, 
 
 	hit := gs.recordShot(g, playerID, opponentID, x, y)
 
-	if g.Status == "finished" {
+	if g.Status == "finished" && gs.db != nil {
+		gs.persistGameFinished(g)
 		return g, ""
 	}
 
@@ -254,8 +317,34 @@ func (gs *GameStore) MakeMove(gameID, playerID uuid.UUID, x, y int) (*GameRoom, 
 		}
 	}
 
+	if gs.db != nil {
+		var turnUUID uuid.NullUUID
+		if g.CurrentTurn != nil {
+			turnUUID = uuid.NullUUID{UUID: *g.CurrentTurn, Valid: true}
+		}
+		var winnerUUID uuid.NullUUID
+		if g.WinnerID != nil {
+			winnerUUID = uuid.NullUUID{UUID: *g.WinnerID, Valid: true}
+		}
+		var finishedAt *time.Time
+		if g.Status == "finished" {
+			t := time.Now()
+			finishedAt = &t
+		}
+		gs.db.UpdateGameStatus(context.Background(), db.UpdateGameStatusParams{
+			ID:          g.ID,
+			Status:      g.Status,
+			CurrentTurn: turnUUID,
+			WinnerID:    winnerUUID,
+			FinishedAt:  finishedAt,
+		})
+	}
+
 	if g.Status == "playing" && g.CurrentTurn != nil && *g.CurrentTurn == BotID {
 		gs.runBotTurn(g)
+		if g.Status == "finished" && gs.db != nil {
+			gs.persistGameFinished(g)
+		}
 	}
 
 	return g, ""
@@ -319,14 +408,31 @@ func (gs *GameStore) recordShot(g *GameRoom, shooterID, opponentID uuid.UUID, x,
 		}
 	}
 
-	g.Moves = append(g.Moves, Move{
+	move := Move{
 		ID:         uuid.New(),
 		PlayerID:   shooterID,
 		X:          x,
 		Y:          y,
 		Hit:        hit,
 		SunkShipID: sunkShipID,
-	})
+	}
+	g.Moves = append(g.Moves, move)
+
+	if gs.db != nil {
+		var sunkID uuid.NullUUID
+		if sunkShipID != nil {
+			sunkID = uuid.NullUUID{UUID: *sunkShipID, Valid: true}
+		}
+		gs.db.SaveGameMove(context.Background(), db.SaveGameMoveParams{
+			ID:         move.ID,
+			GameID:     g.ID,
+			PlayerID:   move.PlayerID,
+			X:          int32(move.X),
+			Y:          int32(move.Y),
+			Hit:        move.Hit,
+			SunkShipID: sunkID,
+		})
+	}
 
 	if hit {
 		allSunk := true
@@ -343,6 +449,25 @@ func (gs *GameStore) recordShot(g *GameRoom, shooterID, opponentID uuid.UUID, x,
 	}
 
 	return hit
+}
+
+func (gs *GameStore) persistGameFinished(g *GameRoom) {
+	var turnUUID uuid.NullUUID
+	if g.CurrentTurn != nil {
+		turnUUID = uuid.NullUUID{UUID: *g.CurrentTurn, Valid: true}
+	}
+	var winnerUUID uuid.NullUUID
+	if g.WinnerID != nil {
+		winnerUUID = uuid.NullUUID{UUID: *g.WinnerID, Valid: true}
+	}
+	t := time.Now()
+	gs.db.UpdateGameStatus(context.Background(), db.UpdateGameStatusParams{
+		ID:          g.ID,
+		Status:      g.Status,
+		CurrentTurn: turnUUID,
+		WinnerID:    winnerUUID,
+		FinishedAt:  &t,
+	})
 }
 
 func (gs *GameStore) randomUntargetedCell(g *GameRoom, targetPlayerID uuid.UUID) (int, int, bool) {
@@ -384,6 +509,9 @@ func (gs *GameStore) runBotTurn(g *GameRoom) {
 		hit := gs.recordShot(g, botID, humanID, x, y)
 
 		if g.Status == "finished" {
+			if gs.db != nil {
+				gs.persistGameFinished(g)
+			}
 			break
 		}
 
@@ -392,6 +520,149 @@ func (gs *GameStore) runBotTurn(g *GameRoom) {
 			break
 		}
 	}
+}
+
+// LoadActiveGames восстанавливает активные игры из БД в in-memory GameStore.
+// Вызывается при старте сервера.
+func (gs *GameStore) LoadActiveGames() {
+	if gs.db == nil {
+		return
+	}
+
+	rows, err := gs.db.GetActiveGames(context.Background())
+	if err != nil {
+		return
+	}
+
+	for _, r := range rows {
+		player2ID := uuidOrNil(r.Player2ID)
+		currentTurn := uuidOrNil(r.CurrentTurn)
+		winnerID := uuidOrNil(r.WinnerID)
+
+		shipRows, err := gs.db.GetGameShips(context.Background(), r.ID)
+		if err != nil {
+			continue
+		}
+
+		ships := make([]Ship, 0, len(shipRows))
+		for _, sr := range shipRows {
+			s := Ship{
+				ID:         sr.ID,
+				PlayerID:   sr.PlayerID,
+				ShipType:   int(sr.ShipType),
+				StartX:     int(sr.StartX),
+				StartY:     int(sr.StartY),
+				Horizontal: sr.Horizontal,
+			}
+			s.Cells = buildCells(s.StartX, s.StartY, s.ShipType, s.Horizontal)
+			ships = append(ships, s)
+		}
+
+		moveRows, err := gs.db.GetGameMoves(context.Background(), r.ID)
+		if err != nil {
+			continue
+		}
+
+		moves := make([]Move, 0, len(moveRows))
+		for _, mr := range moveRows {
+			m := Move{
+				ID:       mr.ID,
+				PlayerID: mr.PlayerID,
+				X:        int(mr.X),
+				Y:        int(mr.Y),
+				Hit:      mr.Hit,
+			}
+			if mr.SunkShipID.Valid {
+				m.SunkShipID = &mr.SunkShipID.UUID
+			}
+			moves = append(moves, m)
+		}
+
+		// Apply hits to ship cells from moves
+		for mi := range moves {
+			m := &moves[mi]
+			for si := range ships {
+				s := &ships[si]
+				if s.PlayerID != m.PlayerID {
+					// This move targets the opponent's ships
+					for ci := range s.Cells {
+						if s.Cells[ci].X == m.X && s.Cells[ci].Y == m.Y {
+							s.Cells[ci].Hit = true
+						}
+					}
+				}
+			}
+		}
+
+		// Mark sunken ships
+		for si := range ships {
+			allHit := true
+			for _, c := range ships[si].Cells {
+				if !c.Hit {
+					allHit = false
+					break
+				}
+			}
+			if allHit {
+				ships[si].Sunk = true
+			}
+		}
+
+		g := &GameRoom{
+			ID:          r.ID,
+			Player1ID:   r.Player1ID,
+			Player2ID:   player2ID,
+			Status:      r.Status,
+			CurrentTurn: currentTurn,
+			WinnerID:    winnerID,
+			Ships:       ships,
+			Moves:       moves,
+			CreatedAt:   r.CreatedAt,
+		}
+		gs.mu.Lock()
+		gs.games[g.ID] = g
+		gs.mu.Unlock()
+	}
+}
+
+// finishGameAndUpdateStats завершает игру (форс-финиш) и обновляет статистику профилей.
+// Возвращает обновлённый game и winnerID. Вызывается из ForfeitGame и MakeMove.
+func (gs *GameStore) FinishGame(gameID uuid.UUID, forfeitingPlayerID uuid.UUID) (*GameRoom, uuid.UUID, string) {
+	gs.mu.Lock()
+	defer gs.mu.Unlock()
+
+	g, ok := gs.games[gameID]
+	if !ok {
+		return nil, uuid.Nil, "Игра не найдена"
+	}
+	if g.Status != "playing" {
+		return nil, uuid.Nil, "Игра не в статусе playing"
+	}
+	if g.Player1ID != forfeitingPlayerID && (g.Player2ID == nil || *g.Player2ID != forfeitingPlayerID) {
+		return nil, uuid.Nil, "Вы не участник этой игры"
+	}
+
+	var winnerID uuid.UUID
+	if forfeitingPlayerID == g.Player1ID {
+		winnerID = *g.Player2ID
+	} else {
+		winnerID = g.Player1ID
+	}
+	g.Status = "finished"
+	g.WinnerID = &winnerID
+	g.CurrentTurn = nil
+
+	if gs.db != nil {
+		gs.persistGameFinished(g)
+	}
+	return g, winnerID, ""
+}
+
+func uuidOrNil(nu uuid.NullUUID) *uuid.UUID {
+	if nu.Valid {
+		return &nu.UUID
+	}
+	return nil
 }
 
 func generateRandomShipSet(rng *rand.Rand, playerID uuid.UUID) []Ship {

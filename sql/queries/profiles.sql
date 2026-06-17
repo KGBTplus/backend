@@ -19,6 +19,16 @@ JOIN users u ON u.id = p.user_id
 ORDER BY p.wins DESC
 LIMIT $1;
 
+-- name: UpdateProfileStats :exec
+UPDATE profiles
+SET total_games = total_games + $2,
+    wins = wins + $3,
+    losses = losses + $4,
+    ships_sunk = ships_sunk + $5,
+    total_shots = total_shots + $6,
+    hits = hits + $7
+WHERE user_id = $1;
+
 -- name: GetPlayerRank :one
 SELECT u.id, u.username, p.wins, p.losses, p.total_games, p.total_shots, p.hits
 FROM profiles p

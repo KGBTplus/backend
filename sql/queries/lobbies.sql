@@ -45,3 +45,12 @@ SELECT EXISTS(SELECT 1 FROM matchmaking_queue WHERE player_id = $1);
 
 -- name: GetMatchmakingQueueSize :one
 SELECT COUNT(*) FROM matchmaking_queue;
+
+-- name: PopMatchmakingPair :many
+DELETE FROM matchmaking_queue
+WHERE player_id IN (
+    SELECT player_id FROM matchmaking_queue
+    ORDER BY joined_at ASC
+    LIMIT 2
+)
+RETURNING player_id, joined_at;

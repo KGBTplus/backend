@@ -21,6 +21,11 @@ var (
 	travelTime  = [8]float64{3.0, 2.5, 2.0, 1.7, 1.7, 2.0, 2.5, 3.0}
 )
 
+const (
+	arcadeSessionTTL    = 30 * time.Minute
+	arcadeCleanupPeriod = 5 * time.Minute
+)
+
 type ArcadeSession struct {
 	ID            string     `json:"id"`
 	Score         int        `json:"score"`
@@ -38,8 +43,24 @@ type ArcadeStore struct {
 }
 
 func NewArcadeStore() *ArcadeStore {
-	return &ArcadeStore{
+	as := &ArcadeStore{
 		sessions: make(map[string]*ArcadeSession),
+	}
+	go as.cleanupLoop()
+	return as
+}
+
+func (as *ArcadeStore) cleanupLoop() {
+	for {
+		time.Sleep(arcadeCleanupPeriod)
+		as.mu.Lock()
+		now := time.Now()
+		for id, sess := range as.sessions {
+			if sess.Status == "finished" || now.Sub(sess.StartedAt) > arcadeSessionTTL {
+				delete(as.sessions, id)
+			}
+		}
+		as.mu.Unlock()
 	}
 }
 

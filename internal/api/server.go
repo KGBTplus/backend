@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,19 +52,21 @@ type Server struct {
 	codes       map[string]otpEntry
 }
 
-func NewServer(db *db.Queries, smtp SMTPConfig, jwtSecret string) *Server {
+func NewServer(database *db.Queries, smtp SMTPConfig, jwtSecret string) *Server {
 	key := []byte(jwtSecret)
 	if len(key) == 0 {
 		key = []byte("my_secret_key")
 	}
-	return &Server{
-		DB:          db,
+	s := &Server{
+		DB:          database,
 		SMTP:        smtp,
 		JWTKey:      key,
-		Games:       NewGameStore(),
+		Games:       NewGameStore(database),
 		ArcadeGames: NewArcadeStore(),
 		codes:       make(map[string]otpEntry),
 	}
+	s.Games.LoadActiveGames()
+	return s
 }
 
 // ---------- Вспомогательные ----------
@@ -153,6 +156,67 @@ func (s *Server) sendEmail(to, code string) error {
 
 	addr := s.SMTP.Host + ":587"
 	return smtp.SendMail(addr, auth, s.SMTP.From, []string{to}, msg)
+}
+
+// updateGameFinishStats обновляет статистику профилей обоих игроков после завершения игры.
+func (s *Server) updateGameFinishStats(ctx context.Context, game *GameRoom) {
+	if game.Status != "finished" || game.WinnerID == nil {
+		return
+	}
+
+	playerIDs := []uuid.UUID{game.Player1ID}
+	if game.Player2ID != nil {
+		playerIDs = append(playerIDs, *game.Player2ID)
+	}
+
+	for _, pid := range playerIDs {
+		if pid == BotID {
+			continue
+		}
+
+		shipsSunk := 0
+		shots := 0
+		hits := 0
+		for _, m := range game.Moves {
+			if m.PlayerID == pid {
+				shots++
+				if m.Hit {
+					hits++
+				}
+			}
+		}
+
+		// Считаем потопленные корабли противника
+		var opponentID uuid.UUID
+		if pid == game.Player1ID && game.Player2ID != nil {
+			opponentID = *game.Player2ID
+		} else if pid == *game.Player2ID {
+			opponentID = game.Player1ID
+		}
+		for _, s := range game.Ships {
+			if s.PlayerID == opponentID && s.Sunk {
+				shipsSunk++
+			}
+		}
+
+		wins := int32(0)
+		losses := int32(0)
+		if game.WinnerID != nil && *game.WinnerID == pid {
+			wins = 1
+		} else {
+			losses = 1
+		}
+
+		s.DB.UpdateProfileStats(ctx, db.UpdateProfileStatsParams{
+			UserID:     pid,
+			TotalGames: 1,
+			Wins:       wins,
+			Losses:     losses,
+			ShipsSunk:  int32(shipsSunk),
+			TotalShots: int32(shots),
+			Hits:       int32(hits),
+		})
+	}
 }
 
 // ---------- Регистрация ----------
@@ -694,29 +758,13 @@ func (s *Server) ForfeitGame(w http.ResponseWriter, r *http.Request, gameID open
 		return
 	}
 
-	game, ok := s.Games.Get(uuid.UUID(gameID))
-	if !ok {
-		sendError(w, http.StatusNotFound, "Игра не найдена")
-		return
-	}
-	if game.Status != "playing" {
-		sendError(w, http.StatusBadRequest, "Игра не в статусе playing")
-		return
-	}
-	if game.Player1ID != userID && (game.Player2ID == nil || *game.Player2ID != userID) {
-		sendError(w, http.StatusForbidden, "Вы не участник этой игры")
+	game, _, errMsg := s.Games.FinishGame(uuid.UUID(gameID), userID)
+	if errMsg != "" {
+		sendError(w, http.StatusBadRequest, errMsg)
 		return
 	}
 
-	var winnerID uuid.UUID
-	if userID == game.Player1ID {
-		winnerID = *game.Player2ID
-	} else {
-		winnerID = game.Player1ID
-	}
-	game.Status = "finished"
-	game.WinnerID = &winnerID
-	game.CurrentTurn = nil
+	s.updateGameFinishStats(context.Background(), game)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(game)
@@ -747,6 +795,10 @@ func (s *Server) MakeMove(w http.ResponseWriter, r *http.Request, gameID openapi
 	if errMsg != "" {
 		sendError(w, http.StatusBadRequest, errMsg)
 		return
+	}
+
+	if game.Status == "finished" {
+		s.updateGameFinishStats(r.Context(), game)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1090,6 +1142,13 @@ func (s *Server) ResetShips(w http.ResponseWriter, r *http.Request, gameID opena
 		}
 	}
 	game.Ships = kept
+
+	if s.DB != nil {
+		s.DB.DeletePlayerGameShips(r.Context(), db.DeletePlayerGameShipsParams{
+			GameID:   uuid.UUID(gameID),
+			PlayerID: userID,
+		})
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(game)
@@ -1447,9 +1506,36 @@ func (s *Server) JoinMatchmaking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Проверка, не в игре ли уже
+	for _, g := range s.Games.All() {
+		if (g.Player1ID == userID || (g.Player2ID != nil && *g.Player2ID == userID)) &&
+			(g.Status == "placing_ships" || g.Status == "playing") {
+			sendError(w, http.StatusConflict, "Вы уже в игре")
+			return
+		}
+	}
+
 	if err := s.DB.JoinMatchmaking(r.Context(), userID); err != nil {
 		sendError(w, http.StatusInternalServerError, "Ошибка")
 		return
+	}
+
+	// Проверяем, можно ли создать пару
+	size, err := s.DB.GetMatchmakingQueueSize(r.Context())
+	if err == nil && size >= 2 {
+		players, err := s.DB.PopMatchmakingPair(r.Context())
+		if err == nil && len(players) == 2 {
+			game := s.Games.Create(players[0].PlayerID)
+			s.Games.Join(game.ID, players[1].PlayerID)
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":       "matched",
+				"game_id":      game.ID,
+				"game":         game,
+			})
+			return
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1467,6 +1553,19 @@ func (s *Server) GetMatchmakingStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		sendError(w, http.StatusInternalServerError, "Ошибка")
 		return
+	}
+
+	// Проверяем, не был ли игрок уже сопоставлен (появилась активная игра)
+	for _, g := range s.Games.All() {
+		if (g.Player1ID == userID || (g.Player2ID != nil && *g.Player2ID == userID)) &&
+			(g.Status == "placing_ships" || g.Status == "playing") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":  "matched",
+				"game_id": g.ID,
+			})
+			return
+		}
 	}
 
 	status := "not_found"

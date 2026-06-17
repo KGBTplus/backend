@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -138,6 +139,44 @@ func (q *Queries) GetMatchmakingQueueSize(ctx context.Context) (int64, error) {
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const popMatchmakingPair = `-- name: PopMatchmakingPair :many
+DELETE FROM matchmaking_queue
+WHERE player_id IN (
+    SELECT player_id FROM matchmaking_queue
+    ORDER BY joined_at ASC
+    LIMIT 2
+)
+RETURNING player_id, joined_at
+`
+
+type PopMatchmakingPairRow struct {
+	PlayerID uuid.UUID
+	JoinedAt time.Time
+}
+
+func (q *Queries) PopMatchmakingPair(ctx context.Context) ([]PopMatchmakingPairRow, error) {
+	rows, err := q.db.QueryContext(ctx, popMatchmakingPair)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PopMatchmakingPairRow
+	for rows.Next() {
+		var i PopMatchmakingPairRow
+		if err := rows.Scan(&i.PlayerID, &i.JoinedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getMatchmakingStatus = `-- name: GetMatchmakingStatus :one
