@@ -509,8 +509,6 @@ func (s *Server) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.DB.EnableEmailOTP(r.Context(), userID)
-
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub": userID.String(),
 		"exp": time.Now().Add(time.Hour * 24).Unix(),
@@ -729,7 +727,6 @@ func (s *Server) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 			sendError(w, http.StatusInternalServerError, "Ошибка подтверждения email")
 			return
 		}
-		s.DB.EnableEmailOTP(r.Context(), user.ID)
 
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 			"sub": user.ID.String(),
