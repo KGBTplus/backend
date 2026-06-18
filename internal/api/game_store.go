@@ -175,6 +175,7 @@ func (gs *GameStore) CheckAndStart(gameID uuid.UUID) {
 	}
 	if p1Ships >= 10 && p2Ships >= 10 {
 		g.Status = "playing"
+		g.CurrentTurn = &g.Player1ID
 	}
 }
 
@@ -194,7 +195,7 @@ func (gs *GameStore) MakeMove(gameID, playerID uuid.UUID, x, y int) (*GameRoom, 
 	}
 
 	for _, m := range g.Moves {
-		if m.X == x && m.Y == y {
+		if m.PlayerID == playerID && m.X == x && m.Y == y {
 			return nil, "Эта клетка уже обстреляна"
 		}
 	}
