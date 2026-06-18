@@ -12,10 +12,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	swagger "github.com/swaggo/http-swagger/v2"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/pressly/goose/v3"
-	httpSwagger "github.com/swaggo/http-swagger/v2"
 )
 
 func runMigrations(db *sql.DB) {
@@ -66,7 +66,7 @@ func main() {
 	// 4. Настройка роутера
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"https://team4.verstack.ru", "http://team4.verstack.ru", "http://localhost:3000"},
+		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: false,
@@ -74,22 +74,28 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	r.Get("/swagger/*", httpSwagger.Handler(
-		httpSwagger.URL("/swagger/doc.json"),
-	))
+	// 5. API руты
+	api.HandlerFromMux(srv, r)
+	r.Post("/auth/verify-email", srv.VerifyEmail)
+	r.Post("/auth/verify-otp", srv.VerifyOTP)
+	r.Post("/login", srv.Login)
+	r.Post("/register", srv.Register)
+	r.Post("/verify-otp", srv.VerifyOTP)
+
+	r.Get("/ws", srv.HandleWebSocket)
 
 	r.Get("/swagger/doc.json", func(w http.ResponseWriter, r *http.Request) {
 		spec, err := api.GetSpecJSON()
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(spec)
 	})
-
-	// 5. Связка с OpenAPI
-	api.HandlerFromMux(srv, r)
+	r.Get("/swagger/*", swagger.Handler(
+		swagger.URL("/swagger/doc.json"),
+	))
 
 	// (Опционально) Вывод маршрутов для отладки
 	log.Println("Зарегистрированные маршруты:")

@@ -1,9 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"math/rand"
 	"net/http"
 	"net/smtp"
@@ -45,6 +48,7 @@ type Server struct {
 	SMTP   SMTPConfig
 	JWTKey []byte
 	Games  *GameStore
+	Hub    *Hub
 	mu     sync.Mutex
 	codes  map[string]otpEntry
 }
@@ -59,6 +63,7 @@ func NewServer(db *db.Queries, smtp SMTPConfig, jwtSecret string) *Server {
 		SMTP:   smtp,
 		JWTKey: key,
 		Games:  NewGameStore(),
+		Hub:    NewHub(),
 		codes:  make(map[string]otpEntry),
 	}
 }
@@ -69,6 +74,148 @@ func sendError(w http.ResponseWriter, code int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+// ---------- WebSocket broadcast helpers ----------
+
+func (s *Server) broadcastOpponentShipsPlaced(gameID uuid.UUID, userID uuid.UUID) {
+	room := s.Hub.GetRoom(gameID)
+	if room == nil {
+		return
+	}
+	room.Broadcast(WSMessage{
+		Type: "opponent_ships_placed",
+	}, userID)
+}
+
+func (s *Server) broadcastOpponentReady(gameID uuid.UUID, userID uuid.UUID) {
+	room := s.Hub.GetRoom(gameID)
+	if room == nil {
+		return
+	}
+	room.Broadcast(WSMessage{
+		Type: "opponent_ready",
+	}, userID)
+}
+
+func (s *Server) broadcastGameStarted(gameID uuid.UUID) {
+	room := s.Hub.GetRoom(gameID)
+	if room == nil {
+		return
+	}
+	game, ok := s.Games.Get(gameID)
+	if !ok {
+		return
+	}
+	currentTurn := ""
+	if game.CurrentTurn != nil {
+		currentTurn = game.CurrentTurn.String()
+	}
+	msg := WSMessage{
+		Type: "game_started",
+		Data: mustJSON(GameStartedData{
+			GameID:      gameID.String(),
+			CurrentTurn: currentTurn,
+		}),
+	}
+	room.mu.RLock()
+	for _, c := range room.Clients {
+		c.SendJSON(msg)
+	}
+	room.mu.RUnlock()
+}
+
+func (s *Server) broadcastOpponentMoved(gameID uuid.UUID, userID uuid.UUID, x, y int, game *GameRoom) {
+	room := s.Hub.GetRoom(gameID)
+	if room == nil {
+		return
+	}
+	var sunk bool
+	if len(game.Moves) > 0 {
+		last := game.Moves[len(game.Moves)-1]
+		sunk = last.SunkShipID != nil
+	}
+	msg := WSMessage{
+		Type: "opponent_moved",
+		Data: mustJSON(OpponentMovedData{
+			GameID:   gameID.String(),
+			X:        x,
+			Y:        y,
+			Hit:      lastMoveHit(game),
+			ShipSunk: sunk,
+		}),
+	}
+	room.Broadcast(msg, userID)
+}
+
+func (s *Server) broadcastYourTurn(gameID uuid.UUID, currentTurn uuid.UUID) {
+	room := s.Hub.GetRoom(gameID)
+	if room == nil {
+		return
+	}
+	room.mu.RLock()
+	defer room.mu.RUnlock()
+	for id, c := range room.Clients {
+		if id == currentTurn {
+			c.SendJSON(WSMessage{
+				Type: "your_turn",
+				Data: mustJSON(YourTurnData{
+					GameID:       gameID.String(),
+					MoveDeadline: time.Now().Add(30 * time.Second).Format(time.RFC3339),
+				}),
+			})
+			break
+		}
+	}
+}
+
+func (s *Server) broadcastGameOver(gameID uuid.UUID, winnerID uuid.UUID, winReason string) {
+	room := s.Hub.GetRoom(gameID)
+	if room == nil {
+		return
+	}
+	game, ok := s.Games.Get(gameID)
+	if !ok {
+		return
+	}
+	p1Sunk := 0
+	p2Sunk := 0
+	for _, s := range game.Ships {
+		if s.PlayerID == game.Player1ID && s.Sunk {
+			p1Sunk++
+		} else if game.Player2ID != nil && s.PlayerID == *game.Player2ID && s.Sunk {
+			p2Sunk++
+		}
+	}
+	winnerUsername := ""
+	if winnerID == game.Player1ID {
+		winnerUsername = game.Player1ID.String()
+	} else if game.Player2ID != nil && winnerID == *game.Player2ID {
+		winnerUsername = game.Player2ID.String()
+	}
+	msg := WSMessage{
+		Type: "game_over",
+		Data: mustJSON(GameOverData{
+			GameID:         gameID.String(),
+			WinnerID:       winnerID.String(),
+			WinnerUsername: winnerUsername,
+			WinReason:      winReason,
+			Player1Sunk:    p1Sunk,
+			Player2Sunk:    p2Sunk,
+		}),
+	}
+	room.mu.RLock()
+	for _, c := range room.Clients {
+		c.SendJSON(msg)
+	}
+	room.mu.RUnlock()
+}
+
+func lastMoveHit(game *GameRoom) bool {
+	if len(game.Moves) == 0 {
+		return false
+	}
+	return game.Moves[len(game.Moves)-1].Hit
 }
 
 func (s *Server) getUserIDFromToken(r *http.Request) (uuid.UUID, error) {
@@ -133,19 +280,19 @@ func generateOTPCode() string {
 	return fmt.Sprintf("%06d", rand.Intn(1000000))
 }
 
-func (s *Server) sendEmail(to, code string) error {
+func (s *Server) sendEmail(to, code, subject string) error {
 	if s.SMTP.Host == "" {
-		fmt.Printf("[EMAIL DEBUG] To: %s, Code: %s\n", to, code)
+		log.Printf("[EMAIL DEBUG] To: %s, Code: %s", to, code)
 		return nil
 	}
 
 	auth := smtp.PlainAuth("", s.SMTP.Username, s.SMTP.Password, s.SMTP.Host)
 	msg := []byte("From: " + s.SMTP.From + "\r\n" +
 		"To: " + to + "\r\n" +
-		"Subject: Sea Battle – код 2FA\r\n" +
+		"Subject: " + subject + "\r\n" +
 		"Content-Type: text/plain; charset=UTF-8\r\n" +
 		"\r\n" +
-		"Ваш код для входа: " + code + "\r\n" +
+		"Ваш код: " + code + "\r\n" +
 		"Код действителен 5 минут.\r\n")
 
 	addr := s.SMTP.Host + ":587"
@@ -199,6 +346,44 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
 			switch pqErr.Constraint {
 			case "users_username_key":
+				existingUser, _ := s.DB.GetUserByUsernameWithVerified(r.Context(), req.Username)
+				if existingUser.EmailVerified == false && existingUser.Email != req.Email && strings.Contains(req.Email, "@") {
+					s.DB.UpdateUserEmail(r.Context(), db.UpdateUserEmailParams{
+						ID:    existingUser.ID,
+						Email: req.Email,
+					})
+					code := generateOTPCode()
+					s.mu.Lock()
+					s.codes["verify:"+existingUser.ID.String()] = otpEntry{
+						Code:      code,
+						ExpiresAt: time.Now().Add(otpExpiry),
+					}
+					s.mu.Unlock()
+
+					if err := s.sendEmail(req.Email, code, "Sea Battle – подтверждение email"); err != nil {
+						sendError(w, http.StatusInternalServerError, "Ошибка отправки кода на email")
+						return
+					}
+
+					tempToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+						"sub":  existingUser.ID.String(),
+						"exp":  time.Now().Add(otpExpiry).Unix(),
+						"type": "temp",
+					})
+					tokenString, err := tempToken.SignedString(s.JWTKey)
+					if err != nil {
+						sendError(w, http.StatusInternalServerError, "Ошибка создания временного токена")
+						return
+					}
+
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusAccepted)
+					json.NewEncoder(w).Encode(map[string]string{
+						"temp_token": tokenString,
+						"message":    "Email обновлён. Код отправлен на новый адрес.",
+					})
+					return
+				}
 				sendError(w, http.StatusConflict, "Пользователь с таким именем уже существует")
 			case "users_email_key":
 				sendError(w, http.StatusConflict, "Пользователь с таким email уже существует")
@@ -216,9 +401,98 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	code := generateOTPCode()
+	s.mu.Lock()
+	s.codes["verify:"+userRow.ID.String()] = otpEntry{
+		Code:      code,
+		ExpiresAt: time.Now().Add(otpExpiry),
+	}
+	s.mu.Unlock()
+
+	if err := s.sendEmail(req.Email, code, "Sea Battle – подтверждение email"); err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка отправки кода на email")
+		return
+	}
+
+	tempToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":  userRow.ID.String(),
+		"exp":  time.Now().Add(otpExpiry).Unix(),
+		"type": "temp",
+	})
+	tokenString, err := tempToken.SignedString(s.JWTKey)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка создания временного токена")
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(userRow)
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{
+		"temp_token": tokenString,
+		"message":    "Код отправлен на email. Подтвердите регистрацию.",
+	})
+}
+
+// ---------- Подтверждение email ----------
+
+func (s *Server) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TempToken string `json:"temp_token"`
+		Code      string `json:"code"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, http.StatusBadRequest, "Неверный формат")
+		return
+	}
+
+	userID, err := s.parseTempToken(req.TempToken)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Неверный или истёкший temp_token")
+		return
+	}
+
+	key := "verify:" + userID.String()
+	s.mu.Lock()
+	entry, ok := s.codes[key]
+	s.mu.Unlock()
+
+	if !ok || time.Now().After(entry.ExpiresAt) {
+		sendError(w, http.StatusBadRequest, "Код истёк или не найден. Войдите, чтобы получить новый код.")
+		return
+	}
+
+	if entry.Code != req.Code {
+		sendError(w, http.StatusUnauthorized, "Неверный код")
+		return
+	}
+
+	s.mu.Lock()
+	delete(s.codes, key)
+	s.mu.Unlock()
+
+	if err := s.DB.VerifyEmail(r.Context(), userID); err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка подтверждения email")
+		return
+	}
+
+	s.DB.EnableEmailOTP(r.Context(), userID)
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub": userID.String(),
+		"exp": time.Now().Add(time.Hour * 24).Unix(),
+	})
+	tokenString, err := token.SignedString(s.JWTKey)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка создания токена")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"token":   tokenString,
+		"message": "Email подтверждён",
+	})
 }
 
 // ---------- Логин (с поддержкой 2FA) ----------
@@ -234,7 +508,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := s.DB.GetUserByUsername(r.Context(), req.Username)
+	user, err := s.DB.GetUserByUsernameWithVerified(r.Context(), req.Username)
 	if err != nil {
 		sendError(w, http.StatusUnauthorized, "Пользователь не найден")
 		return
@@ -242,6 +516,40 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
 		sendError(w, http.StatusUnauthorized, "Неверный пароль")
+		return
+	}
+
+	if !user.EmailVerified {
+		code := generateOTPCode()
+		s.mu.Lock()
+		s.codes["verify:"+user.ID.String()] = otpEntry{
+			Code:      code,
+			ExpiresAt: time.Now().Add(otpExpiry),
+		}
+		s.mu.Unlock()
+
+		if err := s.sendEmail(user.Email, code, "Sea Battle – подтверждение email"); err != nil {
+			sendError(w, http.StatusInternalServerError, "Ошибка отправки кода на email")
+			return
+		}
+
+		tempToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"sub":  user.ID.String(),
+			"exp":  time.Now().Add(otpExpiry).Unix(),
+			"type": "temp",
+		})
+		tokenString, err := tempToken.SignedString(s.JWTKey)
+		if err != nil {
+			sendError(w, http.StatusInternalServerError, "Ошибка создания временного токена")
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]string{
+			"temp_token": tokenString,
+			"message":    "Email не подтверждён. Код отправлен повторно.",
+		})
 		return
 	}
 
@@ -254,7 +562,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		}
 		s.mu.Unlock()
 
-		if err := s.sendEmail(user.Email, code); err != nil {
+		if err := s.sendEmail(user.Email, code, "Sea Battle – код 2FA"); err != nil {
 			sendError(w, http.StatusInternalServerError, "Ошибка отправки кода на email")
 			return
 		}
@@ -312,11 +620,13 @@ func (s *Server) Authenticate2FA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key := "login:" + userID.String()
+	uid := userID.String()
+	isVerify := false
 	s.mu.Lock()
-	entry, ok := s.codes[key]
-	if ok {
-		delete(s.codes, key)
+	entry, ok := s.codes["login:"+uid]
+	if !ok {
+		entry, ok = s.codes["verify:"+uid]
+		isVerify = ok
 	}
 	s.mu.Unlock()
 
@@ -328,6 +638,15 @@ func (s *Server) Authenticate2FA(w http.ResponseWriter, r *http.Request) {
 	if entry.Code != req.Code {
 		sendError(w, http.StatusUnauthorized, "Неверный код")
 		return
+	}
+
+	s.mu.Lock()
+	delete(s.codes, "login:"+uid)
+	delete(s.codes, "verify:"+uid)
+	s.mu.Unlock()
+
+	if isVerify {
+		s.DB.VerifyEmail(r.Context(), userID)
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -344,95 +663,73 @@ func (s *Server) Authenticate2FA(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
 }
 
-// ---------- 2FA настройка (отправка кода на email) ----------
+// ---------- Универсальная верификация OTP (фронтенд шлёт {username, code}) ----------
 
-func (s *Server) Setup2FA(w http.ResponseWriter, r *http.Request) {
-	userID, err := s.getUserIDFromToken(r)
-	if err != nil {
-		sendError(w, http.StatusUnauthorized, "Не авторизован")
-		return
-	}
-
-	user, err := s.DB.GetUserByID(r.Context(), userID)
-	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Ошибка получения пользователя")
-		return
-	}
-	if user.EmailOtpEnabled {
-		sendError(w, http.StatusConflict, "2FA уже включена")
-		return
-	}
-
-	code := generateOTPCode()
-	s.mu.Lock()
-	s.codes["setup:"+user.ID.String()] = otpEntry{
-		Code:      code,
-		ExpiresAt: time.Now().Add(otpExpiry),
-	}
-	s.mu.Unlock()
-
-	if err := s.sendEmail(user.Email, code); err != nil {
-		sendError(w, http.StatusInternalServerError, "Ошибка отправки кода на email")
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "Код отправлен на email"})
-}
-
-// ---------- 2FA подтверждение и активация ----------
-
-func (s *Server) Verify2FA(w http.ResponseWriter, r *http.Request) {
-	userID, err := s.getUserIDFromToken(r)
-	if err != nil {
-		sendError(w, http.StatusUnauthorized, "Не авторизован")
-		return
-	}
-
+func (s *Server) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Code string `json:"code"`
+		Username string `json:"username"`
+		Code     string `json:"code"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		sendError(w, http.StatusBadRequest, "Неверный формат")
+		sendError(w, http.StatusBadRequest, "Неверный формат JSON")
 		return
 	}
 
-	user, err := s.DB.GetUserByID(r.Context(), userID)
+	user, err := s.DB.GetUserByUsername(r.Context(), req.Username)
 	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Ошибка получения пользователя")
-		return
-	}
-	if user.EmailOtpEnabled {
-		sendError(w, http.StatusConflict, "2FA уже активирована")
+		sendError(w, http.StatusUnauthorized, "Пользователь не найден")
 		return
 	}
 
-	key := "setup:" + userID.String()
+	// Сначала ищем код для логина (2FA)
+	loginKey := "login:" + user.ID.String()
 	s.mu.Lock()
-	entry, ok := s.codes[key]
-	if ok {
-		delete(s.codes, key)
-	}
+	loginEntry, loginOk := s.codes[loginKey]
 	s.mu.Unlock()
 
-	if !ok || time.Now().After(entry.ExpiresAt) {
-		sendError(w, http.StatusBadRequest, "Код истёк или не найден. Сначала вызовите /auth/2fa/setup")
+	if loginOk && loginEntry.Code == req.Code && time.Now().Before(loginEntry.ExpiresAt) {
+		s.mu.Lock()
+		delete(s.codes, loginKey)
+		s.mu.Unlock()
+
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"sub": user.ID.String(),
+			"exp": time.Now().Add(time.Hour * 24).Unix(),
+		})
+		tokenString, _ := token.SignedString(s.JWTKey)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
 		return
 	}
 
-	if entry.Code != req.Code {
-		sendError(w, http.StatusUnauthorized, "Неверный код")
+	// Потом ищем код для регистрации (verify)
+	verifyKey := "verify:" + user.ID.String()
+	s.mu.Lock()
+	verifyEntry, verifyOk := s.codes[verifyKey]
+	s.mu.Unlock()
+
+	if verifyOk && verifyEntry.Code == req.Code && time.Now().Before(verifyEntry.ExpiresAt) {
+		s.mu.Lock()
+		delete(s.codes, verifyKey)
+		s.mu.Unlock()
+
+		if err := s.DB.VerifyEmail(r.Context(), user.ID); err != nil {
+			sendError(w, http.StatusInternalServerError, "Ошибка подтверждения email")
+			return
+		}
+		s.DB.EnableEmailOTP(r.Context(), user.ID)
+
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"sub": user.ID.String(),
+			"exp": time.Now().Add(time.Hour * 24).Unix(),
+		})
+		tokenString, _ := token.SignedString(s.JWTKey)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
 		return
 	}
 
-	err = s.DB.EnableEmailOTP(r.Context(), user.ID)
-	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Ошибка активации 2FA")
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "2FA activated"})
+	sendError(w, http.StatusUnauthorized, "Неверный или истёкший код")
 }
 
 // ---------- 2FA отключение ----------
@@ -666,8 +963,10 @@ func (s *Server) GetGameState(w http.ResponseWriter, r *http.Request, gameID ope
 		return
 	}
 
+	resp := s.gameToMap(r.Context(), game)
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(game)
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) ForfeitGame(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
@@ -701,6 +1000,8 @@ func (s *Server) ForfeitGame(w http.ResponseWriter, r *http.Request, gameID open
 	game.WinnerID = &winnerID
 	game.CurrentTurn = nil
 
+	s.broadcastGameOver(uuid.UUID(gameID), winnerID, "forfeit")
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(game)
 }
@@ -732,8 +1033,33 @@ func (s *Server) MakeMove(w http.ResponseWriter, r *http.Request, gameID openapi
 		return
 	}
 
+	s.broadcastGameState(uuid.UUID(gameID))
+	s.broadcastOpponentMoved(uuid.UUID(gameID), userID, req.X, req.Y, game)
+	if game.Status == "finished" {
+		s.broadcastGameOver(uuid.UUID(gameID), *game.WinnerID, "all_ships_sunk")
+	} else {
+		s.broadcastYourTurn(uuid.UUID(gameID), *game.CurrentTurn)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(game)
+}
+
+func (s *Server) broadcastGameState(gameID uuid.UUID) {
+	room := s.Hub.GetRoom(gameID)
+	if room == nil {
+		return
+	}
+	game, ok := s.Games.Get(gameID)
+	if !ok {
+		return
+	}
+	resp := s.gameToMap(context.Background(), game)
+	room.mu.RLock()
+	for _, c := range room.Clients {
+		c.SendJSON(resp)
+	}
+	room.mu.RUnlock()
 }
 
 func (s *Server) GetGameResult(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
@@ -838,6 +1164,10 @@ func (s *Server) PlaceShips(w http.ResponseWriter, r *http.Request, gameID opena
 		return
 	}
 
+	bodyBytes, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	log.Printf("[DEBUG PlaceShips] gameID=%s body=%q", gameID, string(bodyBytes))
+
 	var req struct {
 		Ships []struct {
 			ShipType   int  `json:"ship_type"`
@@ -846,7 +1176,7 @@ func (s *Server) PlaceShips(w http.ResponseWriter, r *http.Request, gameID opena
 			Horizontal bool `json:"horizontal"`
 		} `json:"ships"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
 		sendError(w, http.StatusBadRequest, "Неверный формат JSON")
 		return
 	}
@@ -916,8 +1246,8 @@ func (s *Server) PlaceShips(w http.ResponseWriter, r *http.Request, gameID opena
 		return
 	}
 
-	s.Games.CheckAndStart(uuid.UUID(gameID))
 	game, _ := s.Games.Get(uuid.UUID(gameID))
+	s.broadcastOpponentShipsPlaced(uuid.UUID(gameID), userID)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(game)
 }
@@ -950,10 +1280,18 @@ func (s *Server) ConfirmShips(w http.ResponseWriter, r *http.Request, gameID ope
 		return
 	}
 
+	beforeStatus := game.Status
 	s.Games.CheckAndStart(uuid.UUID(gameID))
+	gameAfter, _ := s.Games.Get(uuid.UUID(gameID))
+
+	s.broadcastOpponentReady(uuid.UUID(gameID), userID)
+	if beforeStatus != "playing" && gameAfter.Status == "playing" {
+		s.broadcastGameStarted(uuid.UUID(gameID))
+		s.broadcastGameState(uuid.UUID(gameID))
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(game)
+	json.NewEncoder(w).Encode(gameAfter)
 }
 
 func (s *Server) PlaceShipsRandom(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
@@ -1043,8 +1381,8 @@ func (s *Server) PlaceShipsRandom(w http.ResponseWriter, r *http.Request, gameID
 		return
 	}
 
-	s.Games.CheckAndStart(uuid.UUID(gameID))
 	game, _ = s.Games.Get(uuid.UUID(gameID))
+	s.broadcastOpponentShipsPlaced(uuid.UUID(gameID), userID)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(game)
 }
@@ -1152,12 +1490,52 @@ func genInviteCode() string {
 	return string(code)
 }
 
-func lobbyToMap(l db.Lobby, players []uuid.UUID) map[string]interface{} {
+func (s *Server) gameToMap(ctx context.Context, g *GameRoom) map[string]interface{} {
+	m := map[string]interface{}{
+		"id":           g.ID,
+		"player1_id":   g.Player1ID,
+		"player2_id":   g.Player2ID,
+		"status":       g.Status,
+		"current_turn": g.CurrentTurn,
+		"winner_id":    g.WinnerID,
+		"ships":        g.Ships,
+		"moves":        g.Moves,
+		"created_at":   g.CreatedAt,
+	}
+	if p1, err := s.DB.GetUserByID(ctx, g.Player1ID); err == nil {
+		m["player1_name"] = p1.Username
+	}
+	if g.Player2ID != nil {
+		if p2, err := s.DB.GetUserByID(ctx, *g.Player2ID); err == nil {
+			m["player2_name"] = p2.Username
+		}
+	}
+	return m
+}
+
+func (s *Server) lobbyToMap(ctx context.Context, l db.Lobby, players []uuid.UUID) map[string]interface{} {
+	usernames := make([]string, 0, len(players))
+	for _, pid := range players {
+		u, err := s.DB.GetUserByID(ctx, pid)
+		if err == nil {
+			usernames = append(usernames, u.Username)
+		} else {
+			usernames = append(usernames, pid.String()[:8])
+		}
+	}
 	m := map[string]interface{}{
 		"id":          l.ID,
 		"creator_id":  l.CreatorID,
+		"creator_name": func() string {
+			cu, err := s.DB.GetUserByID(ctx, l.CreatorID)
+			if err != nil {
+				return l.CreatorID.String()[:8]
+			}
+			return cu.Username
+		}(),
 		"status":      l.Status,
 		"players":     players,
+		"usernames":   usernames,
 		"max_players": l.MaxPlayers,
 	}
 	return m
@@ -1191,7 +1569,7 @@ func (s *Server) ListLobbies(w http.ResponseWriter, r *http.Request, params List
 		if players == nil {
 			players = []uuid.UUID{}
 		}
-		result = append(result, lobbyToMap(l, players))
+		result = append(result, s.lobbyToMap(r.Context(), l, players))
 	}
 	if result == nil {
 		result = []map[string]interface{}{}
@@ -1230,7 +1608,7 @@ func (s *Server) CreateLobby(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(lobbyToMap(l, []uuid.UUID{userID}))
+	json.NewEncoder(w).Encode(s.lobbyToMap(r.Context(), l, []uuid.UUID{userID}))
 }
 
 func (s *Server) GetLobby(w http.ResponseWriter, r *http.Request, lobbyID openapi_types.UUID) {
@@ -1251,7 +1629,7 @@ func (s *Server) GetLobby(w http.ResponseWriter, r *http.Request, lobbyID openap
 		players = []uuid.UUID{}
 	}
 
-	result := lobbyToMap(l, players)
+	result := s.lobbyToMap(r.Context(), l, players)
 	if l.CreatorID == userID {
 		result["invite_code"] = l.InviteCode
 	}
@@ -1308,7 +1686,7 @@ func (s *Server) JoinLobby(w http.ResponseWriter, r *http.Request, lobbyID opena
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(lobbyToMap(l, players))
+	json.NewEncoder(w).Encode(s.lobbyToMap(r.Context(), l, players))
 }
 
 func (s *Server) LeaveLobby(w http.ResponseWriter, r *http.Request, lobbyID openapi_types.UUID) {
@@ -1346,7 +1724,7 @@ func (s *Server) LeaveLobby(w http.ResponseWriter, r *http.Request, lobbyID open
 
 	l, _ := s.DB.GetLobby(r.Context(), uuid.UUID(lobbyID))
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(lobbyToMap(l, players))
+	json.NewEncoder(w).Encode(s.lobbyToMap(r.Context(), l, players))
 }
 
 func (s *Server) DeleteLobby(w http.ResponseWriter, r *http.Request, lobbyID openapi_types.UUID) {
@@ -1418,7 +1796,7 @@ func (s *Server) JoinLobbyByCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(lobbyToMap(l, players))
+	json.NewEncoder(w).Encode(s.lobbyToMap(r.Context(), l, players))
 }
 
 // ---------- Матчмейкинг ----------
