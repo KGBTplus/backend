@@ -49,7 +49,6 @@ spec:
     - type: RequestRedirect
       requestRedirect:
         scheme: https
-        port: 30773
         statusCode: 301
 ---
 apiVersion: gateway.networking.k8s.io/v1
