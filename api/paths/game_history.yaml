@@ -1,0 +1,41 @@
+get:
+  operationId: getGameHistory
+  summary: История завершённых игр
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: page
+      in: query
+      schema:
+        type: integer
+        default: 1
+    - name: limit
+      in: query
+      schema:
+        type: integer
+        default: 20
+    - name: opponent_username
+      in: query
+      schema:
+        type: string
+      description: Фильтр по имени соперника
+  responses:
+    '200':
+      description: Список завершённых игр
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              games:
+                type: array
+                items:
+                  $ref: ../components/schemas/GameHistoryEntry.yaml
+              total:
+                type: integer
+              page:
+                type: integer
+              limit:
+                type: integer
+    '401':
+      description: Не авторизован

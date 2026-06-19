@@ -1,0 +1,16 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: sea-battle-proxy-config
+  namespace: envoy-gateway
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: LoadBalancer
+        annotations:
+          lb.beget.com/algorithm: round_robin
+          lb.beget.com/type: external
+          lb.beget.com/healthcheck-interval-seconds: "60"
+          lb.beget.com/healthcheck-timeout-seconds: "5"

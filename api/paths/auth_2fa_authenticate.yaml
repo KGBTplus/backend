@@ -1,0 +1,29 @@
+post:
+  operationId: authenticate2FA
+  summary: Подтвердить 2FA код и получить JWT
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            temp_token:
+              type: string
+            code:
+              type: string
+          required:
+            - temp_token
+            - code
+  responses:
+    '200':
+      description: Успешная аутентификация, выдан JWT
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              token:
+                type: string
+    '401':
+      description: Неверный код или истёк срок temp_token

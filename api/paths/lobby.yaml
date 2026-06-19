@@ -1,0 +1,56 @@
+get:
+  operationId: getLobby
+  summary: Получить информацию о лобби (включая код-приглашение для создателя)
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: lobbyId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    '200':
+      description: Информация о лобби
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Lobby.yaml
+    '401':
+      description: Не авторизован
+    '404':
+      description: Лобби не найдено
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml
+delete:
+  operationId: deleteLobby
+  summary: Удалить лобби (только создатель)
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: lobbyId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    '200':
+      description: Лобби удалено
+    '401':
+      description: Не авторизован
+    '403':
+      description: Только создатель может удалить лобби
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml
+    '404':
+      description: Лобби не найдено
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml

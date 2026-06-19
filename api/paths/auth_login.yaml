@@ -1,0 +1,40 @@
+post:
+  operationId: login
+  summary: Вход в систему
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            username:
+              type: string
+            password:
+              type: string
+          required:
+            - username
+            - password
+  responses:
+    '200':
+      description: Успешный вход (без 2FA)
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              token:
+                type: string
+    '202':
+      description: Требуется 2FA
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              temp_token:
+                type: string
+              message:
+                type: string
+    '401':
+      description: Неверные учётные данные

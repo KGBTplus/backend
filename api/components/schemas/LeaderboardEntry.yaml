@@ -1,0 +1,30 @@
+type: object
+properties:
+  rank:
+    type: integer
+  player_id:
+    type: string
+    format: uuid
+  username:
+    type: string
+  wins:
+    type: integer
+  losses:
+    type: integer
+  total_games:
+    type: integer
+  win_rate:
+    type: number
+    format: float
+  hit_rate:
+    type: number
+    format: float
+required:
+  - rank
+  - player_id
+  - username
+  - wins
+  - losses
+  - total_games
+  - win_rate
+  - hit_rate

@@ -1,0 +1,13 @@
+type: object
+properties:
+  status:
+    type: string
+    enum:
+      - searching
+      - found
+  game_id:
+    type: string
+    format: uuid
+    nullable: true
+required:
+  - status

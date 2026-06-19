@@ -1,0 +1,21 @@
+type: object
+properties:
+  id:
+    type: string
+    format: uuid
+  username:
+    type: string
+  email:
+    type: string
+    format: email
+  created_at:
+    type: string
+    format: date-time
+  otp_enabled:
+    type: boolean
+    description: Включена ли двухфакторная аутентификация
+required:
+  - id
+  - username
+  - email
+  - created_at

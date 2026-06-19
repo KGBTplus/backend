@@ -1,0 +1,36 @@
+type: object
+properties:
+  id:
+    type: string
+    format: uuid
+  creator_id:
+    type: string
+    format: uuid
+  creator_username:
+    type: string
+  invite_code:
+    type: string
+  status:
+    type: string
+    enum:
+      - waiting
+      - in_game
+      - closed
+  player_count:
+    type: integer
+  game_id:
+    type: string
+    format: uuid
+    nullable: true
+    description: ID игры, когда лобби перешло в статус in_game
+  created_at:
+    type: string
+    format: date-time
+required:
+  - id
+  - creator_id
+  - creator_username
+  - invite_code
+  - status
+  - player_count
+  - created_at

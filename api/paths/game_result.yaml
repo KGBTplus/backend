@@ -1,0 +1,33 @@
+get:
+  operationId: getGameResult
+  summary: Получить результаты завершённой игры
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: gameId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    '200':
+      description: Результаты игры
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/GameResult.yaml
+    '401':
+      description: Не авторизован
+    '403':
+      description: Вы не участник этой игры
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml
+    '404':
+      description: Игра не найдена или ещё не завершена
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Error.yaml

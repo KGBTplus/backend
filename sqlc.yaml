@@ -1,0 +1,9 @@
+version: "2"
+sql:
+  - schema: "sql/migrations/" # Путь к .sql файлам с CREATE TABLE
+    queries: "sql/queries/"    # Путь к .sql файлам с SELECT/INSERT/UPDATE
+    engine: "postgresql"       # Указываем, что база — PostgreSQL
+    gen:
+      go:
+        package: "db"          # Имя пакета для сгенерированного кода
+        out: "internal/db"     # Папка, куда sqlc положит файлы

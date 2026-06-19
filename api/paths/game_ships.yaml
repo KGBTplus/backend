@@ -1,0 +1,56 @@
+post:
+  operationId: placeShips
+  summary: Расставить корабли
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: gameId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            ships:
+              type: array
+              items:
+                type: object
+                properties:
+                  ship_type:
+                    type: integer
+                    minimum: 1
+                    maximum: 4
+                  start_x:
+                    type: integer
+                    minimum: 0
+                    maximum: 9
+                  start_y:
+                    type: integer
+                    minimum: 0
+                    maximum: 9
+                  horizontal:
+                    type: boolean
+                required:
+                  - ship_type
+                  - start_x
+                  - start_y
+                  - horizontal
+  responses:
+    '200':
+      description: Корабли расставлены
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/Game.yaml
+    '401':
+      description: Не авторизован
+    '400':
+      description: Некорректная расстановка
+    '404':
+      description: Игра не найдена
