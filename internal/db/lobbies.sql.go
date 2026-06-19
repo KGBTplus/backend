@@ -66,6 +66,17 @@ func (q *Queries) DeleteLobby(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const deleteUserLobbies = `-- name: DeleteUserLobbies :exec
+DELETE FROM lobbies WHERE id IN (
+    SELECT lobby_id FROM lobby_players WHERE player_id = $1
+)
+`
+
+func (q *Queries) DeleteUserLobbies(ctx context.Context, playerID uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, deleteUserLobbies, playerID)
+	return err
+}
+
 const findLobbyByCode = `-- name: FindLobbyByCode :one
 SELECT id, creator_id, status, invite_code, max_players, created_at FROM lobbies WHERE invite_code = $1 AND status = 'waiting'
 `

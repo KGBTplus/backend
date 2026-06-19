@@ -2022,12 +2022,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/2fa/disable", wrapper.Disable2FA)
 	})
-	// r.Group(func(r chi.Router) {
-	// 	r.Post(options.BaseURL+"/auth/2fa/setup", wrapper.Setup2FA)
-	// })
-	// r.Group(func(r chi.Router) {
-	// 	r.Post(options.BaseURL+"/auth/2fa/verify", wrapper.Verify2FA)
-	// })
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/auth/2fa/setup", wrapper.Setup2FA)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/auth/2fa/verify", wrapper.Verify2FA)
+	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/login", wrapper.Login)
 	})

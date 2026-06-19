@@ -45,3 +45,8 @@ SELECT EXISTS(SELECT 1 FROM matchmaking_queue WHERE player_id = $1);
 
 -- name: GetMatchmakingQueueSize :one
 SELECT COUNT(*) FROM matchmaking_queue;
+
+-- name: DeleteUserLobbies :exec
+DELETE FROM lobbies WHERE id IN (
+    SELECT lobby_id FROM lobby_players WHERE player_id = $1
+);

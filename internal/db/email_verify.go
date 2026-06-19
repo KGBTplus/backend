@@ -68,6 +68,33 @@ func (q *Queries) GetUserByIDWithVerified(ctx context.Context, id uuid.UUID) (Ge
 	return i, err
 }
 
+const getUserByEmailWithVerified = `SELECT id, username, password_hash, email, created_at, email_otp_enabled, COALESCE(email_verified, false) FROM users WHERE email = $1`
+
+type GetUserByEmailWithVerifiedRow struct {
+	ID              uuid.UUID
+	Username        string
+	PasswordHash    string
+	Email           string
+	CreatedAt       time.Time
+	EmailOtpEnabled bool
+	EmailVerified   bool
+}
+
+func (q *Queries) GetUserByEmailWithVerified(ctx context.Context, email string) (GetUserByEmailWithVerifiedRow, error) {
+	row := q.db.QueryRowContext(ctx, getUserByEmailWithVerified, email)
+	var i GetUserByEmailWithVerifiedRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.Email,
+		&i.CreatedAt,
+		&i.EmailOtpEnabled,
+		&i.EmailVerified,
+	)
+	return i, err
+}
+
 const updateUserEmail = `UPDATE users SET email = $2 WHERE id = $1`
 
 type UpdateUserEmailParams struct {

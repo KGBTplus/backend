@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/KGBTplus/backend/internal/db"
 	"github.com/golang-jwt/jwt/v5"
@@ -136,18 +137,30 @@ func (s *Server) broadcastOpponentMoved(gameID uuid.UUID, userID uuid.UUID, x, y
 		return
 	}
 	var sunk bool
+	var sunkCells [][2]int
 	if len(game.Moves) > 0 {
 		last := game.Moves[len(game.Moves)-1]
 		sunk = last.SunkShipID != nil
+		if sunk {
+			for _, ship := range game.Ships {
+				if ship.ID == *last.SunkShipID {
+					for _, cell := range ship.Cells {
+						sunkCells = append(sunkCells, [2]int{cell.X, cell.Y})
+					}
+					break
+				}
+			}
+		}
 	}
 	msg := WSMessage{
 		Type: "opponent_moved",
 		Data: mustJSON(OpponentMovedData{
-			GameID:   gameID.String(),
-			X:        x,
-			Y:        y,
-			Hit:      lastMoveHit(game),
-			ShipSunk: sunk,
+			GameID:    gameID.String(),
+			X:         x,
+			Y:         y,
+			Hit:       lastMoveHit(game),
+			ShipSunk:  sunk,
+			SunkCells: sunkCells,
 		}),
 	}
 	room.Broadcast(msg, userID)
@@ -175,23 +188,72 @@ func (s *Server) broadcastYourTurn(gameID uuid.UUID, currentTurn uuid.UUID) {
 }
 
 func (s *Server) broadcastGameOver(gameID uuid.UUID, winnerID uuid.UUID, winReason string) {
-	room := s.Hub.GetRoom(gameID)
-	if room == nil {
-		return
-	}
 	game, ok := s.Games.Get(gameID)
 	if !ok {
 		return
 	}
+
+	// очищаем лобби обоих игроков в любом случае
+	ctx := context.Background()
+	s.DB.DeleteUserLobbies(ctx, game.Player1ID)
+	if game.Player2ID != nil {
+		s.DB.DeleteUserLobbies(ctx, *game.Player2ID)
+	}
+
 	p1Sunk := 0
 	p2Sunk := 0
-	for _, s := range game.Ships {
-		if s.PlayerID == game.Player1ID && s.Sunk {
+	for _, ship := range game.Ships {
+		if ship.PlayerID == game.Player1ID && ship.Sunk {
 			p1Sunk++
-		} else if game.Player2ID != nil && s.PlayerID == *game.Player2ID && s.Sunk {
+		} else if game.Player2ID != nil && ship.PlayerID == *game.Player2ID && ship.Sunk {
 			p2Sunk++
 		}
 	}
+
+	// считаем выстрелы и попадания для каждого игрока
+	p1Shots, p1Hits := 0, 0
+	p2Shots, p2Hits := 0, 0
+	for _, move := range game.Moves {
+		if move.PlayerID == game.Player1ID {
+			p1Shots++
+			if move.Hit {
+				p1Hits++
+			}
+		} else if game.Player2ID != nil && move.PlayerID == *game.Player2ID {
+			p2Shots++
+			if move.Hit {
+				p2Hits++
+			}
+		}
+	}
+
+	// сохраняем статистику
+	s.DB.UpdateProfileStats(ctx, db.UpdateProfileStatsParams{
+		UserID:     game.Player1ID,
+		TotalGames: 1,
+		Wins:       boolToInt32(winnerID == game.Player1ID),
+		Losses:     boolToInt32(game.Player2ID != nil && winnerID != game.Player1ID),
+		ShipsSunk:  int32(p2Sunk),
+		TotalShots: int32(p1Shots),
+		Hits:       int32(p1Hits),
+	})
+	if game.Player2ID != nil {
+		s.DB.UpdateProfileStats(ctx, db.UpdateProfileStatsParams{
+			UserID:     *game.Player2ID,
+			TotalGames: 1,
+			Wins:       boolToInt32(winnerID == *game.Player2ID),
+			Losses:     boolToInt32(winnerID != *game.Player2ID),
+			ShipsSunk:  int32(p1Sunk),
+			TotalShots: int32(p2Shots),
+			Hits:       int32(p2Hits),
+		})
+	}
+
+	room := s.Hub.GetRoom(gameID)
+	if room == nil {
+		return
+	}
+
 	winnerUsername := ""
 	if winnerID == game.Player1ID {
 		winnerUsername = game.Player1ID.String()
@@ -214,6 +276,13 @@ func (s *Server) broadcastGameOver(gameID uuid.UUID, winnerID uuid.UUID, winReas
 		c.SendJSON(msg)
 	}
 	room.mu.RUnlock()
+}
+
+func boolToInt32(b bool) int32 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func lastMoveHit(game *GameRoom) bool {
@@ -301,7 +370,11 @@ func (s *Server) sendEmail(to, code, subject string) error {
 		"Код действителен 5 минут.\r\n")
 
 	addr := s.SMTP.Host + ":587"
-	return smtp.SendMail(addr, auth, s.SMTP.From, []string{to}, msg)
+	err := smtp.SendMail(addr, auth, s.SMTP.From, []string{to}, msg)
+	if err != nil {
+		log.Printf("[SMTP ERROR] to=%s subject=%s: %v", to, subject, err)
+	}
+	return err
 }
 
 func (s *Server) checkCodeSendRateLimit(key string) bool {
@@ -357,7 +430,7 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.Username) < minUsernameLen || len(req.Username) > maxUsernameLen {
+	if utf8.RuneCountInString(req.Username) < minUsernameLen || utf8.RuneCountInString(req.Username) > maxUsernameLen {
 		sendError(w, http.StatusBadRequest, "Имя пользователя должно содержать от 4 до 16 символов")
 		return
 	}
@@ -388,51 +461,72 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var pqErr *pq.Error
 		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+			var existingUser *db.GetUserByUsernameWithVerifiedRow
+			var found bool
+
 			switch pqErr.Constraint {
 			case "users_username_key":
-				existingUser, _ := s.DB.GetUserByUsernameWithVerified(r.Context(), req.Username)
-				if existingUser.EmailVerified == false && existingUser.Email != req.Email && strings.Contains(req.Email, "@") {
-					s.DB.UpdateUserEmail(r.Context(), db.UpdateUserEmailParams{
-						ID:    existingUser.ID,
-						Email: req.Email,
-					})
-					if !s.checkCodeSendRateLimit("verify:" + existingUser.ID.String()) {
-						sendError(w, http.StatusTooManyRequests, "Код уже отправлен. Попробуйте позже.")
-						return
-					}
-					code := generateOTPCode()
-					s.storeCode("verify:"+existingUser.ID.String(), code)
-
-					if err := s.sendEmail(req.Email, code, "Sea Battle – подтверждение email"); err != nil {
-						sendError(w, http.StatusInternalServerError, "Ошибка отправки кода на email")
-						return
-					}
-
-					tempToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-						"sub":  existingUser.ID.String(),
-						"exp":  time.Now().Add(otpExpiry).Unix(),
-						"type": "temp",
-					})
-					tokenString, err := tempToken.SignedString(s.JWTKey)
-					if err != nil {
-						sendError(w, http.StatusInternalServerError, "Ошибка создания временного токена")
-						return
-					}
-
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusAccepted)
-					json.NewEncoder(w).Encode(map[string]string{
-						"temp_token": tokenString,
-						"message":    "Email обновлён. Код отправлен на новый адрес.",
-					})
-					return
+				u, e := s.DB.GetUserByUsernameWithVerified(r.Context(), req.Username)
+				if e == nil {
+					existingUser = &u
+					found = true
 				}
-				sendError(w, http.StatusConflict, "Пользователь с таким именем уже существует")
 			case "users_email_key":
-				sendError(w, http.StatusConflict, "Пользователь с таким email уже существует")
+				u, e := s.DB.GetUserByEmailWithVerified(r.Context(), req.Email)
+				if e == nil {
+					existingUser = &db.GetUserByUsernameWithVerifiedRow{
+						ID:              u.ID,
+						Username:        u.Username,
+						PasswordHash:    u.PasswordHash,
+						Email:           u.Email,
+						CreatedAt:       u.CreatedAt,
+						EmailOtpEnabled: u.EmailOtpEnabled,
+						EmailVerified:   u.EmailVerified,
+					}
+					found = true
+				}
 			default:
 				sendError(w, http.StatusConflict, "Пользователь с таким именем или email уже существует")
+				return
 			}
+
+			if !found || existingUser.EmailVerified {
+				if pqErr.Constraint == "users_username_key" {
+					sendError(w, http.StatusConflict, "Пользователь с таким именем уже существует")
+				} else {
+					sendError(w, http.StatusConflict, "Пользователь с таким email уже существует")
+				}
+				return
+			}
+
+			if existingUser.Email != req.Email && strings.Contains(req.Email, "@") {
+				s.DB.UpdateUserEmail(r.Context(), db.UpdateUserEmailParams{
+					ID:    existingUser.ID,
+					Email: req.Email,
+				})
+			}
+			targetEmail := req.Email
+			if !strings.Contains(targetEmail, "@") {
+				targetEmail = existingUser.Email
+			}
+			code := generateOTPCode()
+			s.storeCode("verify:"+existingUser.ID.String(), code)
+			log.Printf("[EMAIL] Code for %s (%s): %s", existingUser.Username, targetEmail, code)
+			if err := s.sendEmail(targetEmail, code, "Sea Battle – подтверждение email"); err != nil {
+				log.Printf("[EMAIL] sendEmail failed for %s: %v", targetEmail, err)
+			}
+			tempToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+				"sub":  existingUser.ID.String(),
+				"exp":  time.Now().Add(otpExpiry).Unix(),
+				"type": "temp",
+			})
+			tokenString, _ := tempToken.SignedString(s.JWTKey)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			json.NewEncoder(w).Encode(map[string]string{
+				"temp_token": tokenString,
+				"message":    "Код отправлен на email",
+			})
 			return
 		}
 		sendError(w, http.StatusInternalServerError, "Ошибка при создании пользователя")
@@ -444,16 +538,11 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.checkCodeSendRateLimit("verify:" + userRow.ID.String()) {
-		sendError(w, http.StatusTooManyRequests, "Код уже отправлен. Попробуйте позже.")
-		return
-	}
 	code := generateOTPCode()
 	s.storeCode("verify:"+userRow.ID.String(), code)
-
+	log.Printf("[EMAIL] Code for %s (%s): %s", userRow.Username, req.Email, code)
 	if err := s.sendEmail(req.Email, code, "Sea Battle – подтверждение email"); err != nil {
-		sendError(w, http.StatusInternalServerError, "Ошибка отправки кода на email")
-		return
+		log.Printf("[EMAIL] sendEmail failed for %s: %v", req.Email, err)
 	}
 
 	tempToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -461,17 +550,13 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 		"exp":  time.Now().Add(otpExpiry).Unix(),
 		"type": "temp",
 	})
-	tokenString, err := tempToken.SignedString(s.JWTKey)
-	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Ошибка создания временного токена")
-		return
-	}
+	tokenString, _ := tempToken.SignedString(s.JWTKey)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{
 		"temp_token": tokenString,
-		"message":    "Код отправлен на email. Подтвердите регистрацию.",
+		"message":    "Код отправлен на email",
 	})
 }
 
@@ -551,16 +636,11 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !user.EmailVerified {
-		if !s.checkCodeSendRateLimit("verify:" + user.ID.String()) {
-			sendError(w, http.StatusTooManyRequests, "Код уже отправлен. Попробуйте позже.")
-			return
-		}
 		code := generateOTPCode()
 		s.storeCode("verify:"+user.ID.String(), code)
-
+		log.Printf("[EMAIL] Code for %s (%s): %s", user.Username, user.Email, code)
 		if err := s.sendEmail(user.Email, code, "Sea Battle – подтверждение email"); err != nil {
-			sendError(w, http.StatusInternalServerError, "Ошибка отправки кода на email")
-			return
+			log.Printf("[EMAIL] sendEmail failed for %s: %v", user.Email, err)
 		}
 
 		tempToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -568,32 +648,26 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 			"exp":  time.Now().Add(otpExpiry).Unix(),
 			"type": "temp",
 		})
-		tokenString, err := tempToken.SignedString(s.JWTKey)
-		if err != nil {
-			sendError(w, http.StatusInternalServerError, "Ошибка создания временного токена")
-			return
-		}
+		tokenString, _ := tempToken.SignedString(s.JWTKey)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
 		json.NewEncoder(w).Encode(map[string]string{
 			"temp_token": tokenString,
-			"message":    "Email не подтверждён. Код отправлен повторно.",
+			"message":    "Код отправлен на email",
 		})
 		return
 	}
 
 	if user.EmailOtpEnabled {
-		if !s.checkCodeSendRateLimit("login:" + user.ID.String()) {
-			sendError(w, http.StatusTooManyRequests, "Код уже отправлен. Попробуйте позже.")
-			return
-		}
-		code := generateOTPCode()
-		s.storeCode("login:"+user.ID.String(), code)
+		if s.checkCodeSendRateLimit("login:" + user.ID.String()) {
+			code := generateOTPCode()
+			s.storeCode("login:"+user.ID.String(), code)
 
-		if err := s.sendEmail(user.Email, code, "Sea Battle – код 2FA"); err != nil {
-			sendError(w, http.StatusInternalServerError, "Ошибка отправки кода на email")
-			return
+			if err := s.sendEmail(user.Email, code, "Sea Battle – код 2FA"); err != nil {
+				sendError(w, http.StatusInternalServerError, "Ошибка отправки кода на email")
+				return
+			}
 		}
 
 		tempToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -755,6 +829,12 @@ func (s *Server) Disable2FA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	key := "2fa_setup:" + userID.String()
+	s.mu.Lock()
+	delete(s.codeRateLimits, key)
+	delete(s.codes, key)
+	s.mu.Unlock()
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "2FA disabled"})
 }
@@ -868,16 +948,19 @@ func (s *Server) GetProfile(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":             user.ID,
-		"username":       user.Username,
-		"total_games":    profile.TotalGames,
-		"wins":           profile.Wins,
-		"losses":         profile.Losses,
-		"win_percentage": winPct,
-		"ships_sunk":     profile.ShipsSunk,
-		"total_shots":    profile.TotalShots,
-		"hits":           profile.Hits,
-		"hit_percentage": hitPct,
+		"id":               user.ID,
+		"username":         user.Username,
+		"email":            user.Email,
+		"created_at":       user.CreatedAt,
+		"otp_enabled":      user.EmailOtpEnabled,
+		"total_games":      profile.TotalGames,
+		"wins":             profile.Wins,
+		"losses":           profile.Losses,
+		"win_percentage":   winPct,
+		"ships_sunk":       profile.ShipsSunk,
+		"total_shots":      profile.TotalShots,
+		"hits":             profile.Hits,
+		"hit_percentage":   hitPct,
 	})
 }
 
@@ -896,7 +979,7 @@ func (s *Server) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.Username) < minUsernameLen || len(req.Username) > maxUsernameLen {
+	if utf8.RuneCountInString(req.Username) < minUsernameLen || utf8.RuneCountInString(req.Username) > maxUsernameLen {
 		sendError(w, http.StatusBadRequest, "Имя пользователя должно содержать от 4 до 16 символов")
 		return
 	}
@@ -965,6 +1048,108 @@ func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "password changed"})
+}
+
+func (s *Server) SendForgotPasswordCode(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, http.StatusBadRequest, "Неверный формат JSON")
+		return
+	}
+
+	if req.Username == "" {
+		sendError(w, http.StatusBadRequest, "Укажите username")
+		return
+	}
+
+	user, err := s.DB.GetUserByUsernameWithVerified(r.Context(), req.Username)
+	if err != nil {
+		sendError(w, http.StatusNotFound, "Пользователь не найден")
+		return
+	}
+
+	if !user.EmailVerified {
+		sendError(w, http.StatusBadRequest, "Email не подтверждён")
+		return
+	}
+
+	if !s.checkCodeSendRateLimit("forgot_password:" + user.ID.String()) {
+		sendError(w, http.StatusTooManyRequests, "Код уже отправлен. Попробуйте позже.")
+		return
+	}
+
+	code := generateOTPCode()
+	s.storeCode("forgot_password:"+user.ID.String(), code)
+
+	if err := s.sendEmail(user.Email, code, "Sea Battle – сброс пароля"); err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка отправки кода на email")
+		return
+	}
+
+	email := user.Email
+	masked := email[:3] + "***" + email[strings.Index(email, "@"):]
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"email":   masked,
+		"message": "Код отправлен на почту " + masked,
+	})
+}
+
+func (s *Server) ResetForgotPassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username    string `json:"username"`
+		Code        string `json:"code"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, http.StatusBadRequest, "Неверный формат JSON")
+		return
+	}
+
+	if len(req.NewPassword) < minPasswordLen || len(req.NewPassword) > maxPasswordLen {
+		sendError(w, http.StatusBadRequest, "Пароль должен содержать от 8 до 20 символов")
+		return
+	}
+
+	user, err := s.DB.GetUserByUsernameWithVerified(r.Context(), req.Username)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Пользователь не найден")
+		return
+	}
+
+	ok, blocked := s.verifyCode("forgot_password:"+user.ID.String(), req.Code)
+	if blocked {
+		sendError(w, http.StatusTooManyRequests, "Слишком много попыток. Запросите новый код.")
+		return
+	}
+	if !ok {
+		sendError(w, http.StatusUnauthorized, "Неверный или истёкший код")
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка при смене пароля")
+		return
+	}
+
+	if err := s.DB.UpdatePassword(r.Context(), db.UpdatePasswordParams{
+		ID:           user.ID,
+		PasswordHash: string(hash),
+	}); err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка при смене пароля")
+		return
+	}
+
+	s.mu.Lock()
+	delete(s.codeRateLimits, "forgot_password:"+user.ID.String())
+	s.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "password reset"})
 }
 
 // ---------- Игры ----------
@@ -1374,7 +1559,6 @@ func (s *Server) ConfirmShips(w http.ResponseWriter, r *http.Request, gameID ope
 	s.broadcastOpponentReady(uuid.UUID(gameID), userID)
 	if beforeStatus != "playing" && gameAfter.Status == "playing" {
 		s.broadcastGameStarted(uuid.UUID(gameID))
-		s.broadcastGameState(uuid.UUID(gameID))
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1592,12 +1776,38 @@ func (s *Server) gameToMap(ctx context.Context, g *GameRoom) map[string]interfac
 	if p1, err := s.DB.GetUserByID(ctx, g.Player1ID); err == nil {
 		m["player1_name"] = p1.Username
 	}
+	if p1p, err := s.DB.GetProfile(ctx, g.Player1ID); err == nil {
+		m["player1_stats"] = profileToMap(p1p)
+	}
 	if g.Player2ID != nil {
 		if p2, err := s.DB.GetUserByID(ctx, *g.Player2ID); err == nil {
 			m["player2_name"] = p2.Username
 		}
+		if p2p, err := s.DB.GetProfile(ctx, *g.Player2ID); err == nil {
+			m["player2_stats"] = profileToMap(p2p)
+		}
 	}
 	return m
+}
+
+func profileToMap(p db.Profile) map[string]interface{} {
+	var winPct, hitPct float64
+	if p.TotalGames > 0 {
+		winPct = float64(p.Wins) / float64(p.TotalGames) * 100
+	}
+	if p.TotalShots > 0 {
+		hitPct = float64(p.Hits) / float64(p.TotalShots) * 100
+	}
+	return map[string]interface{}{
+		"total_games":    p.TotalGames,
+		"wins":           p.Wins,
+		"losses":         p.Losses,
+		"ships_sunk":     p.ShipsSunk,
+		"total_shots":    p.TotalShots,
+		"hits":           p.Hits,
+		"win_percentage": winPct,
+		"hit_percentage": hitPct,
+	}
 }
 
 func (s *Server) lobbyToMap(ctx context.Context, l db.Lobby, players []uuid.UUID) map[string]interface{} {
@@ -1761,11 +1971,34 @@ func (s *Server) JoinLobby(w http.ResponseWriter, r *http.Request, lobbyID opena
 
 	players, _ := s.DB.GetLobbyPlayers(r.Context(), l.ID)
 	if len(players) >= int(l.MaxPlayers) {
-		s.DB.UpdateLobbyStatus(r.Context(), db.UpdateLobbyStatusParams{
-			ID:     l.ID,
-			Status: "full",
+		game := s.Games.Create(l.CreatorID)
+		log.Printf("[LOBBY] game created: %s, creator=%s, status=%s", game.ID, l.CreatorID, game.Status)
+		joined := s.Games.Join(game.ID, userID)
+		log.Printf("[LOBBY] join result: %v, game status after=%s, p2=%v", joined, game.Status, game.Player2ID)
+		s.DB.DeleteLobby(r.Context(), l.ID)
+
+		// create room and add creator's WS client if connected
+		room := s.Hub.GetOrCreateRoom(game.ID)
+		log.Printf("[LOBBY] room %s has %d clients before adding", game.ID, len(room.Clients))
+		if client, ok := s.Hub.GetClient(l.CreatorID); ok {
+			room.AddClient(client)
+			log.Printf("[LOBBY] added creator %s to room", l.CreatorID)
+		} else {
+			log.Printf("[LOBBY] creator %s NOT connected to WS", l.CreatorID)
+		}
+
+		// notify creator via WS
+		s.Hub.SendToClient(l.CreatorID, WSMessage{
+			Type: "match_found",
+			Data: mustJSON(MatchFoundData{GameID: game.ID.String()}),
 		})
-		l.Status = "full"
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"game_id": game.ID.String(),
+			"status":  "game_ready",
+		})
+		return
 	}
 
 	if players == nil {
@@ -2018,3 +2251,5 @@ func generateSimpleShips(rng *rand.Rand) []Ship {
 	}
 	return result
 }
+
+
