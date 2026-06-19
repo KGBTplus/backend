@@ -65,6 +65,35 @@ func (q *Queries) EnableEmailOTP(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const getUserByEmail = `-- name: GetUserByEmail :one
+SELECT id, username, password_hash, email, created_at, email_otp_enabled
+FROM users
+WHERE email = $1
+`
+
+type GetUserByEmailRow struct {
+	ID              uuid.UUID
+	Username        string
+	PasswordHash    string
+	Email           string
+	CreatedAt       time.Time
+	EmailOtpEnabled bool
+}
+
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error) {
+	row := q.db.QueryRowContext(ctx, getUserByEmail, email)
+	var i GetUserByEmailRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.Email,
+		&i.CreatedAt,
+		&i.EmailOtpEnabled,
+	)
+	return i, err
+}
+
 const getUserByID = `-- name: GetUserByID :one
 SELECT id, username, password_hash, email, created_at, email_otp_enabled
 FROM users

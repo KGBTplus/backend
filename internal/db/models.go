@@ -46,4 +46,5 @@ type User struct {
 	CreatedAt       time.Time
 	Email           string
 	EmailOtpEnabled bool
+	EmailVerified   bool
 }

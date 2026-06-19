@@ -32,3 +32,8 @@ WHERE id = $1;
 UPDATE users
 SET password_hash = $2
 WHERE id = $1;
+
+-- name: GetUserByEmail :one
+SELECT id, username, password_hash, email, created_at, email_otp_enabled
+FROM users
+WHERE email = $1;

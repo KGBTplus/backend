@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -42,11 +43,12 @@ type GameStartedData struct {
 }
 
 type OpponentMovedData struct {
-	GameID   string `json:"game_id"`
-	X        int    `json:"x"`
-	Y        int    `json:"y"`
-	Hit      bool   `json:"hit"`
-	ShipSunk bool   `json:"ship_sunk"`
+	GameID   string   `json:"game_id"`
+	X        int      `json:"x"`
+	Y        int      `json:"y"`
+	Hit      bool     `json:"hit"`
+	ShipSunk bool     `json:"ship_sunk"`
+	SunkCells [][2]int `json:"sunk_cells,omitempty"`
 }
 
 type YourTurnData struct {
@@ -188,6 +190,30 @@ func (h *Hub) GetRoom(gameID uuid.UUID) *Room {
 	return h.rooms[gameID]
 }
 
+func (h *Hub) SendToClient(userID uuid.UUID, v interface{}) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	client, ok := h.clients[userID]
+	if !ok {
+		return
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return
+	}
+	select {
+	case client.Send <- data:
+	default:
+	}
+}
+
+func (h *Hub) GetClient(userID uuid.UUID) (*Client, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	c, ok := h.clients[userID]
+	return c, ok
+}
+
 func (h *Hub) RegisterClient(c *Client) {
 	h.mu.Lock()
 	h.clients[c.UserID] = c
@@ -266,7 +292,9 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		Send:   make(chan []byte, 256),
 	}
 
+	log.Printf("[WS] user=%s connecting", userID)
 	s.Hub.RegisterClient(client)
+	log.Printf("[WS] user=%s registered, hub has %d clients", userID, len(s.Hub.clients))
 
 	go client.writePump()
 	go client.readPump()
@@ -305,36 +333,58 @@ func (c *Client) readPump() {
 		return nil
 	})
 
-	// notify of matchmaking status
-	c.SendJSON(WSMessage{Type: "matchmaking_searching"})
-
-	// try to find a match
-	opponentID := c.Server.Hub.FindMatch(c.UserID)
-	if opponentID != nil {
-		game := c.Server.Games.Create(c.UserID)
-		c.Server.Games.Join(game.ID, *opponentID)
-
-		room := c.Server.Hub.GetOrCreateRoom(game.ID)
+	// Check for existing active game (reconnection support)
+	if activeGame := c.Server.Games.FindActiveGame(c.UserID); activeGame != nil {
+		log.Printf("[WS readPump] user=%s found active game %s status=%s p1=%s p2=%v", c.UserID, activeGame.ID, activeGame.Status, activeGame.Player1ID, activeGame.Player2ID)
+		room := c.Server.Hub.GetOrCreateRoom(activeGame.ID)
 		room.AddClient(c)
 
-		opponentClient, ok := func() (*Client, bool) {
-			c.Server.Hub.mu.RLock()
-			defer c.Server.Hub.mu.RUnlock()
-			cl, ok := c.Server.Hub.clients[*opponentID]
-			return cl, ok
-		}()
-		if ok {
-			room.AddClient(opponentClient)
-			gameIDStr := game.ID.String()
+		gameIDStr := activeGame.ID.String()
+		c.SendJSON(WSMessage{
+			Type: "match_found",
+			Data: mustJSON(MatchFoundData{GameID: gameIDStr}),
+		})
 
-			c.SendJSON(WSMessage{
-				Type: "match_found",
-				Data: mustJSON(MatchFoundData{GameID: gameIDStr}),
-			})
-			opponentClient.SendJSON(WSMessage{
-				Type: "match_found",
-				Data: mustJSON(MatchFoundData{GameID: gameIDStr}),
-			})
+		// Send full game state so frontend can render current board
+		resp := c.Server.gameToMap(context.Background(), activeGame)
+		c.SendJSON(resp)
+	} else {
+		log.Printf("[WS readPump] user=%s no active game found, sending matchmaking_searching", c.UserID)
+		// notify of matchmaking status
+		c.SendJSON(WSMessage{Type: "matchmaking_searching"})
+
+		// try to find a match
+		opponentID := c.Server.Hub.FindMatch(c.UserID)
+		if opponentID != nil {
+			game := c.Server.Games.Create(c.UserID)
+			c.Server.Games.Join(game.ID, *opponentID)
+
+			room := c.Server.Hub.GetOrCreateRoom(game.ID)
+			room.AddClient(c)
+
+			opponentClient, ok := func() (*Client, bool) {
+				c.Server.Hub.mu.RLock()
+				defer c.Server.Hub.mu.RUnlock()
+				cl, ok := c.Server.Hub.clients[*opponentID]
+				return cl, ok
+			}()
+			if ok {
+				room.AddClient(opponentClient)
+				gameIDStr := game.ID.String()
+
+				c.SendJSON(WSMessage{
+					Type: "match_found",
+					Data: mustJSON(MatchFoundData{GameID: gameIDStr}),
+				})
+				opponentClient.SendJSON(WSMessage{
+					Type: "match_found",
+					Data: mustJSON(MatchFoundData{GameID: gameIDStr}),
+				})
+			}
+
+			// Clean up any open lobbies for both players
+			c.Server.DB.DeleteUserLobbies(context.Background(), c.UserID)
+			c.Server.DB.DeleteUserLobbies(context.Background(), *opponentID)
 		}
 	}
 

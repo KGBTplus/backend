@@ -108,6 +108,9 @@ func main() {
 	r.Post("/register", srv.Register)
 	r.Post("/verify-otp", srv.VerifyOTP)
 
+	r.Post("/auth/password/forgot/send-code", srv.SendForgotPasswordCode)
+	r.Post("/auth/password/forgot/reset", srv.ResetForgotPassword)
+
 	r.Get("/ws", srv.HandleWebSocket)
 
 	r.Get("/swagger/doc.json", func(w http.ResponseWriter, r *http.Request) {

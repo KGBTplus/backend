@@ -90,6 +90,19 @@ func (gs *GameStore) ListAvailable(excludePlayerID uuid.UUID) []*GameRoom {
 	return result
 }
 
+func (gs *GameStore) FindActiveGame(playerID uuid.UUID) *GameRoom {
+	gs.mu.RLock()
+	defer gs.mu.RUnlock()
+	for _, g := range gs.games {
+		if g.Status == "playing" || g.Status == "placing_ships" {
+			if g.Player1ID == playerID || (g.Player2ID != nil && *g.Player2ID == playerID) {
+				return g
+			}
+		}
+	}
+	return nil
+}
+
 func (gs *GameStore) Join(gameID, playerID uuid.UUID) bool {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
@@ -116,15 +129,13 @@ func (gs *GameStore) PlaceShips(gameID, playerID uuid.UUID, ships []Ship) bool {
 	if g.Player1ID != playerID && (g.Player2ID == nil || *g.Player2ID != playerID) {
 		return false
 	}
-	playerShips := 0
+	var kept []Ship
 	for _, s := range g.Ships {
-		if s.PlayerID == playerID {
-			playerShips++
+		if s.PlayerID != playerID {
+			kept = append(kept, s)
 		}
 	}
-	if playerShips > 0 {
-		return false
-	}
+	g.Ships = kept
 	for i := range ships {
 		ships[i].ID = uuid.New()
 		ships[i].PlayerID = playerID

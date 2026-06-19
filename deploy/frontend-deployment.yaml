@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: sea-battle-frontend
-          image: spoty0101/sea-battle-frontend:latest
+          image: leschah/sea-battle-frontend:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 80
