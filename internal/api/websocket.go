@@ -92,6 +92,10 @@ type ErrorData struct {
 	Message string `json:"message"`
 }
 
+type OpponentLeftData struct {
+	Message string `json:"message"`
+}
+
 // ---------- Client ----------
 
 type Client struct {
@@ -363,6 +367,7 @@ func (s *Server) parseJWT(tokenStr string) (uuid.UUID, error) {
 
 func (c *Client) readPump() {
 	defer func() {
+		c.Server.handleClientDisconnect(c)
 		c.Server.Hub.UnregisterClient(c.UserID)
 		c.Conn.Close()
 	}()
@@ -423,6 +428,9 @@ func (c *Client) readPump() {
 				})
 			}
 
+			// Start the 90-second placement timer
+			c.Server.startPlacementTimer(game.ID)
+
 			// Clean up any open lobbies for both players
 			c.Server.DB.DeleteUserLobbies(context.Background(), c.UserID)
 			c.Server.DB.DeleteUserLobbies(context.Background(), *opponentID)
@@ -446,6 +454,8 @@ func (c *Client) readPump() {
 		switch msg.Type {
 		case "ping":
 			c.SendJSON(WSMessage{Type: "pong"})
+		case "leave_lobby":
+			c.Server.handleLeaveLobby(c)
 		}
 	}
 }

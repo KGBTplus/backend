@@ -1,3 +1,4 @@
+-- +goose NO TRANSACTION
 -- +goose Up
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_lobby_players_player_id ON lobby_players(player_id);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_wins ON profiles(wins DESC);

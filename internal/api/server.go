@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	crand "crypto/rand"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -59,6 +58,7 @@ type Server struct {
 	JWTKey []byte
 	Games  *GameStore
 	Hub    *Hub
+	Timers *TimerManager
 	SecureCookies  bool
 	codesMu        sync.Mutex
 	codes          map[string]otpEntry
@@ -74,6 +74,7 @@ func NewServer(db *db.Queries, smtp SMTPConfig, jwtSecret string, opts ...Server
 		JWTKey: key,
 		Games:  NewGameStore(db),
 		Hub:           NewHub(),
+		Timers:        NewTimerManager(),
 		codes:         make(map[string]otpEntry),
 		codeRateLimits: make(map[string]time.Time),
 	}
@@ -519,10 +520,11 @@ func maskEmail(email string) string {
 
 func (s *Server) sendEmail(to, code, subject string) error {
 	if s.SMTP.Host == "" {
-		log.Printf("[EMAIL DEBUG] Code sent to %s", maskEmail(to))
+		log.Printf("[EMAIL DEBUG] To: %s, Code: %s", to, code)
 		return nil
 	}
 
+	auth := smtp.PlainAuth("", s.SMTP.Username, s.SMTP.Password, s.SMTP.Host)
 	msg := []byte("From: " + s.SMTP.From + "\r\n" +
 		"To: " + to + "\r\n" +
 		"Subject: " + subject + "\r\n" +
@@ -532,45 +534,9 @@ func (s *Server) sendEmail(to, code, subject string) error {
 		"Код действителен 5 минут.\r\n")
 
 	addr := s.SMTP.Host + ":587"
-	tlsConfig := &tls.Config{ServerName: s.SMTP.Host}
-	conn, err := tls.Dial("tcp", addr, tlsConfig)
+	err := smtp.SendMail(addr, auth, s.SMTP.From, []string{to}, msg)
 	if err != nil {
-		log.Printf("[SMTP ERROR] TLS dial to=%s: %v", to, err)
-		return err
-	}
-	defer conn.Close()
-	client, err := smtp.NewClient(conn, s.SMTP.Host)
-	if err != nil {
-		log.Printf("[SMTP ERROR] NewClient to=%s: %v", to, err)
-		return err
-	}
-	defer client.Close()
-	auth := smtp.PlainAuth("", s.SMTP.Username, s.SMTP.Password, s.SMTP.Host)
-	if err := client.Auth(auth); err != nil {
-		log.Printf("[SMTP ERROR] Auth to=%s: %v", to, err)
-		return err
-	}
-	if err := client.Mail(s.SMTP.From); err != nil {
-		log.Printf("[SMTP ERROR] Mail from=%s: %v", s.SMTP.From, err)
-		return err
-	}
-	if err := client.Rcpt(to); err != nil {
-		log.Printf("[SMTP ERROR] Rcpt to=%s: %v", to, err)
-		return err
-	}
-	wc, err := client.Data()
-	if err != nil {
-		log.Printf("[SMTP ERROR] Data to=%s: %v", to, err)
-		return err
-	}
-	_, err = wc.Write(msg)
-	if err != nil {
-		log.Printf("[SMTP ERROR] Write to=%s: %v", to, err)
-		return err
-	}
-	err = wc.Close()
-	if err != nil {
-		log.Printf("[SMTP ERROR] Close to=%s: %v", to, err)
+		log.Printf("[SMTP ERROR] to=%s subject=%s: %v", to, subject, err)
 	}
 	return err
 }

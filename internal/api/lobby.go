@@ -178,6 +178,9 @@ func (s *Server) JoinLobby(w http.ResponseWriter, r *http.Request, lobbyID opena
 		log.Printf("[LOBBY] join result: %v, game status after=%s, p2=%v", joined, game.Status, game.Player2ID)
 		s.DB.DeleteLobby(r.Context(), l.ID)
 
+		// Start the 90-second placement timer
+		s.startPlacementTimer(game.ID)
+
 		// create room and add creator's WS client if connected
 		room := s.Hub.GetOrCreateRoom(game.ID)
 		log.Printf("[LOBBY] room %s has %d clients before adding", game.ID, len(room.Clients))

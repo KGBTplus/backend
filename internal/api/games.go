@@ -131,6 +131,7 @@ func (s *Server) ForfeitGame(w http.ResponseWriter, r *http.Request, gameID open
 	game.WinnerID = &winnerID
 	game.CurrentTurn = nil
 
+	s.Timers.StopAll(uuid.UUID(gameID))
 	s.broadcastGameOver(uuid.UUID(gameID), winnerID, "forfeit")
 
 	w.Header().Set("Content-Type", "application/json")
@@ -167,9 +168,12 @@ func (s *Server) MakeMove(w http.ResponseWriter, r *http.Request, gameID openapi
 	s.broadcastGameState(uuid.UUID(gameID))
 	s.broadcastOpponentMoved(uuid.UUID(gameID), userID, req.X, req.Y, game)
 	if game.Status == "finished" {
+		s.Timers.StopAll(uuid.UUID(gameID))
 		s.broadcastGameOver(uuid.UUID(gameID), *game.WinnerID, "all_ships_sunk")
 	} else {
+		s.Timers.StopTurn(uuid.UUID(gameID))
 		s.broadcastYourTurn(uuid.UUID(gameID), *game.CurrentTurn)
+		s.startTurnTimer(uuid.UUID(gameID))
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -436,7 +440,9 @@ func (s *Server) ConfirmShips(w http.ResponseWriter, r *http.Request, gameID ope
 
 	s.broadcastOpponentReady(uuid.UUID(gameID), userID)
 	if beforeStatus != "playing" && gameAfter.Status == "playing" {
+		s.Timers.StopPlacement(uuid.UUID(gameID))
 		s.broadcastGameStarted(uuid.UUID(gameID))
+		s.startTurnTimer(uuid.UUID(gameID))
 	}
 
 	w.Header().Set("Content-Type", "application/json")
