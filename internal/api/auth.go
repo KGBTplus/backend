@@ -65,46 +65,73 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		var pqErr *pq.Error
-		if errors.As(err, &pqErr) && pqErr.Constraint == "users_username_key" {
-			u, e := s.DB.GetUserByUsernameWithVerified(r.Context(), req.Username)
-			if e == nil && !u.EmailVerified {
-				if u.Email != req.Email {
-					if _, mailErr := mail.ParseAddress(req.Email); mailErr == nil {
-						s.DB.UpdateUserEmail(r.Context(), db.UpdateUserEmailParams{
-							ID:    u.ID,
-							Email: req.Email,
-						})
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+			var existingUser *db.GetUserByUsernameWithVerifiedRow
+			var found bool
+
+			switch pqErr.Constraint {
+			case "users_username_key":
+				u, e := s.DB.GetUserByUsernameWithVerified(r.Context(), req.Username)
+				if e == nil {
+					existingUser = &u
+					found = true
+				}
+			case "users_email_key":
+				u, e := s.DB.GetUserByEmailWithVerified(r.Context(), req.Email)
+				if e == nil {
+					existingUser = &db.GetUserByUsernameWithVerifiedRow{
+						ID:              u.ID,
+						Username:        u.Username,
+						PasswordHash:    u.PasswordHash,
+						Email:           u.Email,
+						CreatedAt:       u.CreatedAt,
+						EmailOtpEnabled: u.EmailOtpEnabled,
+						EmailVerified:   u.EmailVerified,
 					}
+					found = true
 				}
-				targetEmail := req.Email
-				if _, mailErr := mail.ParseAddress(targetEmail); mailErr != nil {
-					targetEmail = u.Email
-				}
-				if !s.checkCodeSendRateLimit("verify:" + u.ID.String()) {
-					sendError(w, http.StatusTooManyRequests, "Код уже отправлен. Попробуйте позже.")
-					return
-				}
-				code := generateOTPCode()
-				s.storeCode("verify:"+u.ID.String(), code)
-				log.Printf("[EMAIL] Code sent to %s (%s)", u.Username, maskEmail(targetEmail))
-				if err := s.sendEmail(targetEmail, code, "Sea Battle – подтверждение email"); err != nil {
-					log.Printf("[EMAIL] sendEmail failed for %s: %v", targetEmail, err)
-				}
-				tempToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-					"sub":  u.ID.String(),
-					"exp":  time.Now().Add(otpExpiry).Unix(),
-					"type": "temp",
-				})
-				tokenString, _ := tempToken.SignedString(s.JWTKey)
-				s.setTempCookie(w, tokenString)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusAccepted)
-				json.NewEncoder(w).Encode(map[string]string{
-					"message": "Код отправлен на email",
-				})
+			default:
+				sendError(w, http.StatusConflict, "Пользователь с таким именем или email уже существует")
 				return
 			}
-			sendError(w, http.StatusConflict, "Пользователь с таким именем уже существует")
+
+			if !found || existingUser.EmailVerified {
+				if pqErr.Constraint == "users_username_key" {
+					sendError(w, http.StatusConflict, "Пользователь с таким именем уже существует")
+				} else {
+					sendError(w, http.StatusConflict, "Пользователь с таким email уже существует")
+				}
+				return
+			}
+
+			if existingUser.Email != req.Email {
+				s.DB.UpdateUserEmail(r.Context(), db.UpdateUserEmailParams{
+					ID:    existingUser.ID,
+					Email: req.Email,
+				})
+			}
+			if !s.checkCodeSendRateLimit("verify:" + existingUser.ID.String()) {
+				sendError(w, http.StatusTooManyRequests, "Код уже отправлен. Попробуйте позже.")
+				return
+			}
+			code := generateOTPCode()
+			s.storeCode("verify:"+existingUser.ID.String(), code)
+			log.Printf("[EMAIL] Code sent to %s (%s)", existingUser.Username, maskEmail(req.Email))
+			if err := s.sendEmail(req.Email, code, "Sea Battle – подтверждение email"); err != nil {
+				log.Printf("[EMAIL] sendEmail failed for %s: %v", req.Email, err)
+			}
+			tempToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+				"sub":  existingUser.ID.String(),
+				"exp":  time.Now().Add(otpExpiry).Unix(),
+				"type": "temp",
+			})
+			tokenString, _ := tempToken.SignedString(s.JWTKey)
+			s.setTempCookie(w, tokenString)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			json.NewEncoder(w).Encode(map[string]string{
+				"message": "Код отправлен на email",
+			})
 			return
 		}
 		sendError(w, http.StatusInternalServerError, "Ошибка при создании пользователя")

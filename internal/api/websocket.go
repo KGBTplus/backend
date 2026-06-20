@@ -40,6 +40,8 @@ const (
 	maxMessageSize = 4096
 )
 
+var DebugMode = true
+
 // ---------- WS message types ----------
 
 type WSMessage struct {
@@ -66,8 +68,9 @@ type OpponentMovedData struct {
 }
 
 type YourTurnData struct {
-	GameID      string `json:"game_id"`
+	GameID       string `json:"game_id"`
 	MoveDeadline string `json:"move_deadline"`
+	CurrentTurn  string `json:"current_turn"`
 }
 
 type TimerData struct {
@@ -81,6 +84,13 @@ type GameOverData struct {
 	WinReason      string `json:"win_reason"`
 	Player1Sunk    int    `json:"player1_ships_sunk"`
 	Player2Sunk    int    `json:"player2_ships_sunk"`
+	Result         string `json:"result"`
+	Reward1        int    `json:"reward1"`
+	Reward2        int    `json:"reward2"`
+	Hits1          int    `json:"hits1"`
+	Hits2          int    `json:"hits2"`
+	PerfectWin1    bool   `json:"perfect_win1"`
+	PerfectWin2    bool   `json:"perfect_win2"`
 }
 
 type RematchData struct {
@@ -178,17 +188,15 @@ func (r *Room) GetOtherClient(userID uuid.UUID) *Client {
 // ---------- Hub ----------
 
 type Hub struct {
-	mu         sync.RWMutex
-	rooms      map[uuid.UUID]*Room
-	clients    map[uuid.UUID]*Client
-	matchmaking []uuid.UUID
+	mu      sync.RWMutex
+	rooms   map[uuid.UUID]*Room
+	clients map[uuid.UUID]*Client
 }
 
 func NewHub() *Hub {
 	return &Hub{
-		rooms:      make(map[uuid.UUID]*Room),
-		clients:    make(map[uuid.UUID]*Client),
-		matchmaking: []uuid.UUID{},
+		rooms:   make(map[uuid.UUID]*Room),
+		clients: make(map[uuid.UUID]*Client),
 	}
 }
 
@@ -246,41 +254,7 @@ func (h *Hub) UnregisterClient(userID uuid.UUID) {
 		client.Room.RemoveClient(userID)
 	}
 	delete(h.clients, userID)
-	// remove from matchmaking if present
-	for i, uid := range h.matchmaking {
-		if uid == userID {
-			h.matchmaking = append(h.matchmaking[:i], h.matchmaking[i+1:]...)
-			break
-		}
-	}
 	h.mu.Unlock()
-}
-
-func (h *Hub) FindMatch(userID uuid.UUID) *uuid.UUID {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	// don't add duplicates
-	for _, uid := range h.matchmaking {
-		if uid == userID {
-			return nil
-		}
-	}
-	// look for an opponent
-	for _, uid := range h.matchmaking {
-		_, ok := h.clients[uid]
-		if ok && uid != userID {
-			// remove opponent from queue
-			for i, u := range h.matchmaking {
-				if u == uid {
-					h.matchmaking = append(h.matchmaking[:i], h.matchmaking[i+1:]...)
-					break
-				}
-			}
-			return &uid
-		}
-	}
-	h.matchmaking = append(h.matchmaking, userID)
-	return nil
 }
 
 // ---------- WebSocket handler ----------
@@ -394,47 +368,25 @@ func (c *Client) readPump() {
 		// Send full game state so frontend can render current board
 		resp := c.Server.gameToMap(context.Background(), activeGame)
 		c.SendJSON(resp)
+
+		// Send synthetic timer_tick so joiner sees remaining placement time
+		if activeGame.Status == "placing_ships" {
+			elapsed := int(time.Since(activeGame.CreatedAt).Seconds())
+			remaining := PlacementTimerDuration - elapsed
+			if remaining < 0 {
+				remaining = 0
+			}
+			c.SendJSON(WSMessage{
+				Type: "timer_tick",
+				Data: mustJSON(map[string]interface{}{
+					"timer_type":   "placement",
+					"seconds_left": remaining,
+				}),
+			})
+		}
 	} else {
 		log.Printf("[WS readPump] user=%s no active game found, sending matchmaking_searching", c.UserID)
-		// notify of matchmaking status
 		c.SendJSON(WSMessage{Type: "matchmaking_searching"})
-
-		// try to find a match
-		opponentID := c.Server.Hub.FindMatch(c.UserID)
-		if opponentID != nil {
-			game := c.Server.Games.Create(c.UserID)
-			c.Server.Games.Join(game.ID, *opponentID)
-
-			room := c.Server.Hub.GetOrCreateRoom(game.ID)
-			room.AddClient(c)
-
-			opponentClient, ok := func() (*Client, bool) {
-				c.Server.Hub.mu.RLock()
-				defer c.Server.Hub.mu.RUnlock()
-				cl, ok := c.Server.Hub.clients[*opponentID]
-				return cl, ok
-			}()
-			if ok {
-				room.AddClient(opponentClient)
-				gameIDStr := game.ID.String()
-
-				c.SendJSON(WSMessage{
-					Type: "match_found",
-					Data: mustJSON(MatchFoundData{GameID: gameIDStr}),
-				})
-				opponentClient.SendJSON(WSMessage{
-					Type: "match_found",
-					Data: mustJSON(MatchFoundData{GameID: gameIDStr}),
-				})
-			}
-
-			// Start the 90-second placement timer
-			c.Server.startPlacementTimer(game.ID)
-
-			// Clean up any open lobbies for both players
-			c.Server.DB.DeleteUserLobbies(context.Background(), c.UserID)
-			c.Server.DB.DeleteUserLobbies(context.Background(), *opponentID)
-		}
 	}
 
 	for {
@@ -451,11 +403,25 @@ func (c *Client) readPump() {
 			continue
 		}
 
+		if DebugMode {
+			log.Printf("[WS] user=%s received type=%s", c.UserID, msg.Type)
+		}
+
 		switch msg.Type {
 		case "ping":
 			c.SendJSON(WSMessage{Type: "pong"})
 		case "leave_lobby":
 			c.Server.handleLeaveLobby(c)
+		case "cancel_matchmaking":
+			c.Server.DB.LeaveMatchmaking(context.Background(), c.UserID)
+			c.SendJSON(WSMessage{Type: "matchmaking_cancelled"})
+			if DebugMode {
+				log.Printf("[WS] user=%s cancelled matchmaking", c.UserID)
+			}
+		case "force_leave_to_lobby":
+			c.Server.handleForceLeaveToLobby(c)
+		case "toggle_revanch":
+			c.Server.handleToggleRevanch(c)
 		}
 	}
 }

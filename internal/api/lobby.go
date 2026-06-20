@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"net/http"
 
 	"github.com/KGBTplus/backend/internal/db"
@@ -84,6 +83,27 @@ func (s *Server) CreateLobby(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Try to find an existing waiting lobby (not owned by this user) and auto-join it
+	existing, err := s.DB.ListLobbies(r.Context(), db.ListLobbiesParams{
+		Limit:  100,
+		Offset: 0,
+		Status: "waiting",
+	})
+	if err == nil {
+		for _, l := range existing {
+			if l.CreatorID != userID {
+				exists, _ := s.DB.IsPlayerInLobby(r.Context(), db.IsPlayerInLobbyParams{
+					LobbyID:  l.ID,
+					PlayerID: userID,
+				})
+				if !exists {
+					s.JoinLobby(w, r, openapi_types.UUID(l.ID))
+					return
+				}
+			}
+		}
+	}
+
 	l, err := s.DB.CreateLobby(r.Context(), db.CreateLobbyParams{
 		ID:         uuid.New(),
 		CreatorID:  userID,
@@ -158,7 +178,13 @@ func (s *Server) JoinLobby(w http.ResponseWriter, r *http.Request, lobbyID opena
 		PlayerID: userID,
 	})
 	if err == nil && exists {
-		sendError(w, http.StatusConflict, "Вы уже в лобби")
+		// Player is already in this lobby — return current state instead of erroring
+		players, _ := s.DB.GetLobbyPlayers(r.Context(), l.ID)
+		if players == nil {
+			players = []uuid.UUID{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(s.lobbyToMap(r.Context(), l, players))
 		return
 	}
 
@@ -172,30 +198,9 @@ func (s *Server) JoinLobby(w http.ResponseWriter, r *http.Request, lobbyID opena
 
 	players, _ := s.DB.GetLobbyPlayers(r.Context(), l.ID)
 	if len(players) >= int(l.MaxPlayers) {
-		game := s.Games.Create(l.CreatorID)
-		log.Printf("[LOBBY] game created: %s, creator=%s, status=%s", game.ID, l.CreatorID, game.Status)
-		joined := s.Games.Join(game.ID, userID)
-		log.Printf("[LOBBY] join result: %v, game status after=%s, p2=%v", joined, game.Status, game.Player2ID)
 		s.DB.DeleteLobby(r.Context(), l.ID)
 
-		// Start the 90-second placement timer
-		s.startPlacementTimer(game.ID)
-
-		// create room and add creator's WS client if connected
-		room := s.Hub.GetOrCreateRoom(game.ID)
-		log.Printf("[LOBBY] room %s has %d clients before adding", game.ID, len(room.Clients))
-		if client, ok := s.Hub.GetClient(l.CreatorID); ok {
-			room.AddClient(client)
-			log.Printf("[LOBBY] added creator %s to room", l.CreatorID)
-		} else {
-			log.Printf("[LOBBY] creator %s NOT connected to WS", l.CreatorID)
-		}
-
-		// notify creator via WS
-		s.Hub.SendToClient(l.CreatorID, WSMessage{
-			Type: "match_found",
-			Data: mustJSON(MatchFoundData{GameID: game.ID.String()}),
-		})
+		game := s.CreateGameSession(l.CreatorID, userID)
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -220,7 +225,8 @@ func (s *Server) LeaveLobby(w http.ResponseWriter, r *http.Request, lobbyID open
 		return
 	}
 
-	if _, err := s.DB.GetLobby(r.Context(), uuid.UUID(lobbyID)); err != nil {
+	l, err := s.DB.GetLobby(r.Context(), uuid.UUID(lobbyID))
+	if err != nil {
 		sendError(w, http.StatusNotFound, "Лобби не найдено")
 		return
 	}
@@ -233,8 +239,9 @@ func (s *Server) LeaveLobby(w http.ResponseWriter, r *http.Request, lobbyID open
 		return
 	}
 
-	players, _ := s.DB.GetLobbyPlayers(r.Context(), uuid.UUID(lobbyID))
-	if len(players) == 0 {
+	// if the creator leaves, delete the lobby entirely
+	remaining, _ := s.DB.GetLobbyPlayers(r.Context(), uuid.UUID(lobbyID))
+	if l.CreatorID == userID || len(remaining) == 0 {
 		s.DB.DeleteLobby(r.Context(), uuid.UUID(lobbyID))
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "lobby deleted"})
@@ -246,9 +253,8 @@ func (s *Server) LeaveLobby(w http.ResponseWriter, r *http.Request, lobbyID open
 		Status: "waiting",
 	})
 
-	l, _ := s.DB.GetLobby(r.Context(), uuid.UUID(lobbyID))
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.lobbyToMap(r.Context(), l, players))
+	json.NewEncoder(w).Encode(s.lobbyToMap(r.Context(), l, remaining))
 }
 
 func (s *Server) DeleteLobby(w http.ResponseWriter, r *http.Request, lobbyID openapi_types.UUID) {

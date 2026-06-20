@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"math/big"
 	"math/rand"
 	"net/http"
@@ -22,18 +23,18 @@ import (
 )
 
 const (
-	minUsernameLen      = 4
-	maxUsernameLen      = 16
-	minPasswordLen      = 8
-	maxPasswordLen      = 128
-	otpExpiry           = 5 * time.Minute
-	codeSendCooldown    = 60 * time.Second
-	maxCodeAttempts     = 5
-	bcryptCost          = 12
-	boardSize           = 10
-	maxShips            = 10
-	accessTokenExpiry   = 15 * time.Minute
-	refreshTokenExpiry  = 7 * 24 * time.Hour
+	minUsernameLen     = 4
+	maxUsernameLen     = 16
+	minPasswordLen     = 8
+	maxPasswordLen     = 128
+	otpExpiry          = 5 * time.Minute
+	codeSendCooldown   = 60 * time.Second
+	maxCodeAttempts    = 5
+	bcryptCost         = 12
+	boardSize          = 10
+	maxShips           = 10
+	accessTokenExpiry  = 15 * time.Minute
+	refreshTokenExpiry = 7 * 24 * time.Hour
 )
 
 var usernameRegex = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
@@ -53,12 +54,12 @@ type otpEntry struct {
 
 type Server struct {
 	Unimplemented
-	DB     *db.Queries
-	SMTP   SMTPConfig
-	JWTKey []byte
-	Games  *GameStore
-	Hub    *Hub
-	Timers *TimerManager
+	DB             *db.Queries
+	SMTP           SMTPConfig
+	JWTKey         []byte
+	Games          *GameStore
+	Hub            *Hub
+	Timers         *TimerManager
 	SecureCookies  bool
 	codesMu        sync.Mutex
 	codes          map[string]otpEntry
@@ -69,13 +70,13 @@ type Server struct {
 func NewServer(db *db.Queries, smtp SMTPConfig, jwtSecret string, opts ...ServerOption) *Server {
 	key := []byte(jwtSecret)
 	s := &Server{
-		DB:     db,
-		SMTP:   smtp,
-		JWTKey: key,
-		Games:  NewGameStore(db),
-		Hub:           NewHub(),
-		Timers:        NewTimerManager(),
-		codes:         make(map[string]otpEntry),
+		DB:             db,
+		SMTP:           smtp,
+		JWTKey:         key,
+		Games:          NewGameStore(db),
+		Hub:            NewHub(),
+		Timers:         NewTimerManager(),
+		codes:          make(map[string]otpEntry),
 		codeRateLimits: make(map[string]time.Time),
 	}
 	for _, opt := range opts {
@@ -288,27 +289,28 @@ func (s *Server) broadcastYourTurn(gameID uuid.UUID, currentTurn uuid.UUID) {
 	}
 	room.mu.RLock()
 	defer room.mu.RUnlock()
-	for id, c := range room.Clients {
-		if id == currentTurn {
-			c.SendJSON(WSMessage{
-				Type: "your_turn",
-				Data: mustJSON(YourTurnData{
-					GameID:       gameID.String(),
-					MoveDeadline: time.Now().Add(30 * time.Second).Format(time.RFC3339),
-				}),
-			})
-			break
-		}
+	for _, c := range room.Clients {
+		c.SendJSON(WSMessage{
+			Type: "your_turn",
+			Data: mustJSON(YourTurnData{
+				GameID:       gameID.String(),
+				MoveDeadline: time.Now().Add(time.Duration(TurnTimerDuration) * time.Second).Format(time.RFC3339),
+				CurrentTurn:  currentTurn.String(),
+			}),
+		})
 	}
 }
 
-func (s *Server) broadcastGameOver(gameID uuid.UUID, winnerID uuid.UUID, winReason string) {
-	game, ok := s.Games.Get(gameID)
-	if !ok {
+func (s *Server) broadcastGameOver(gameID uuid.UUID, winnerID uuid.UUID, winReason string, result string) {
+	s.Games.Lock()
+	game, ok := s.Games.GetLocked(gameID)
+	if !ok || game.isGameOverBroadcasted {
+		s.Games.Unlock()
 		return
 	}
+	game.isGameOverBroadcasted = true
+	s.Games.Unlock()
 
-	// очищаем лобби обоих игроков в любом случае
 	ctx := context.Background()
 	s.DB.DeleteUserLobbies(ctx, game.Player1ID)
 	if game.Player2ID != nil {
@@ -325,7 +327,6 @@ func (s *Server) broadcastGameOver(gameID uuid.UUID, winnerID uuid.UUID, winReas
 		}
 	}
 
-	// считаем выстрелы и попадания для каждого игрока
 	p1Shots, p1Hits := 0, 0
 	p2Shots, p2Hits := 0, 0
 	for _, move := range game.Moves {
@@ -342,12 +343,14 @@ func (s *Server) broadcastGameOver(gameID uuid.UUID, winnerID uuid.UUID, winReas
 		}
 	}
 
-	// сохраняем статистику
+	isDraw := result == "draw"
+	winnerExists := winnerID != uuid.Nil && !isDraw
+
 	s.DB.UpdateProfileStats(ctx, db.UpdateProfileStatsParams{
 		UserID:     game.Player1ID,
 		TotalGames: 1,
-		Wins:       boolToInt32(winnerID == game.Player1ID),
-		Losses:     boolToInt32(game.Player2ID != nil && winnerID != game.Player1ID),
+		Wins:       boolToInt32(winnerExists && winnerID == game.Player1ID),
+		Losses:     boolToInt32(winnerExists && game.Player2ID != nil && winnerID != game.Player1ID),
 		ShipsSunk:  int32(p2Sunk),
 		TotalShots: int32(p1Shots),
 		Hits:       int32(p1Hits),
@@ -356,12 +359,46 @@ func (s *Server) broadcastGameOver(gameID uuid.UUID, winnerID uuid.UUID, winReas
 		s.DB.UpdateProfileStats(ctx, db.UpdateProfileStatsParams{
 			UserID:     *game.Player2ID,
 			TotalGames: 1,
-			Wins:       boolToInt32(winnerID == *game.Player2ID),
-			Losses:     boolToInt32(winnerID != *game.Player2ID),
+			Wins:       boolToInt32(winnerExists && winnerID == *game.Player2ID),
+			Losses:     boolToInt32(winnerExists && winnerID != *game.Player2ID),
 			ShipsSunk:  int32(p1Sunk),
 			TotalShots: int32(p2Shots),
 			Hits:       int32(p2Hits),
 		})
+	}
+
+	// --- Economy: calculate coin rewards ---
+	var p1Result string
+	var p2Result string
+	if isDraw {
+		p1Result = "DRAW"
+		p2Result = "DRAW"
+	} else if winnerExists && winnerID == game.Player1ID {
+		p1Result = "WIN"
+		p2Result = "LOSE"
+	} else {
+		p1Result = "LOSE"
+		p2Result = "WIN"
+	}
+
+	perfectWin1 := winnerExists && winnerID == game.Player1ID && p1Sunk == 0
+	perfectWin2 := winnerExists && game.Player2ID != nil && winnerID == *game.Player2ID && p2Sunk == 0
+
+	reward1 := calcGameReward(p1Result, p1Hits, perfectWin1)
+	reward2 := calcGameReward(p2Result, p2Hits, perfectWin2)
+
+	earnedDelta1 := int32(0)
+	if reward1 > 0 {
+		earnedDelta1 = int32(reward1)
+	}
+	earnedDelta2 := int32(0)
+	if reward2 > 0 {
+		earnedDelta2 = int32(reward2)
+	}
+
+	s.DB.AddGameReward(ctx, game.Player1ID, int32(reward1), earnedDelta1)
+	if game.Player2ID != nil {
+		s.DB.AddGameReward(ctx, *game.Player2ID, int32(reward2), earnedDelta2)
 	}
 
 	room := s.Hub.GetRoom(gameID)
@@ -370,27 +407,64 @@ func (s *Server) broadcastGameOver(gameID uuid.UUID, winnerID uuid.UUID, winReas
 	}
 
 	winnerUsername := ""
-	if winnerID == game.Player1ID {
+	if winnerExists && winnerID == game.Player1ID {
 		winnerUsername = game.Player1ID.String()
-	} else if game.Player2ID != nil && winnerID == *game.Player2ID {
+	} else if winnerExists && game.Player2ID != nil && winnerID == *game.Player2ID {
 		winnerUsername = game.Player2ID.String()
 	}
-	msg := WSMessage{
-		Type: "game_over",
-		Data: mustJSON(GameOverData{
-			GameID:         gameID.String(),
-			WinnerID:       winnerID.String(),
-			WinnerUsername: winnerUsername,
-			WinReason:      winReason,
-			Player1Sunk:    p1Sunk,
-			Player2Sunk:    p2Sunk,
-		}),
+	winnerIDStr := ""
+	if winnerExists {
+		winnerIDStr = winnerID.String()
 	}
+
+	gameOverData := GameOverData{
+		GameID:         gameID.String(),
+		WinnerID:       winnerIDStr,
+		WinnerUsername: winnerUsername,
+		WinReason:      winReason,
+		Player1Sunk:    p1Sunk,
+		Player2Sunk:    p2Sunk,
+		Result:         result,
+		Reward1:        reward1,
+		Reward2:        reward2,
+		Hits1:          p1Hits,
+		Hits2:          p2Hits,
+		PerfectWin1:    perfectWin1,
+		PerfectWin2:    perfectWin2,
+	}
+
 	room.mu.RLock()
 	for _, c := range room.Clients {
-		c.SendJSON(msg)
+		c.SendJSON(WSMessage{
+			Type: "game_over",
+			Data: mustJSON(gameOverData),
+		})
 	}
 	room.mu.RUnlock()
+
+	s.startGameOverTimer(gameID)
+}
+
+func calcGameReward(result string, hits int, perfectWin bool) int {
+	var resultReward int
+	switch result {
+	case "WIN":
+		resultReward = WIN_REWARD
+	case "DRAW":
+		resultReward = DRAW_REWARD
+	case "LOSE":
+		resultReward = LOSE_REWARD
+	}
+
+	baseResult := resultReward + hits*HIT_REWARD
+	if perfectWin {
+		baseResult += PERFECT_WIN_BONUS
+	}
+
+	randomFactor := RANDOM_FACTOR_MIN + rand.Float64()*(RANDOM_FACTOR_MAX-RANDOM_FACTOR_MIN)
+	finalResult := int(math.Round(float64(baseResult) * (1 + randomFactor)))
+
+	return finalResult
 }
 
 func boolToInt32(b bool) int32 {
@@ -632,12 +706,12 @@ func generateSimpleShips() []Ship {
 			for y := 0; y < boardSize && !placed; y++ {
 				for x := 0; x < boardSize && !placed; x++ {
 					horizontal := rand.Intn(2) == 0
-				if horizontal && x+size > boardSize {
-					continue
-				}
-				if !horizontal && y+size > boardSize {
-					continue
-				}
+					if horizontal && x+size > boardSize {
+						continue
+					}
+					if !horizontal && y+size > boardSize {
+						continue
+					}
 					ok := true
 					for j := 0; j < size; j++ {
 						cx, cy := x, y

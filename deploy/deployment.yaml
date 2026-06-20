@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: leschah/battleship-backend:v20
+          image: leschah/battleship-backend:v25
           imagePullPolicy: Always
           ports:
             - containerPort: 8080

@@ -46,6 +46,12 @@ type GameRoom struct {
 	Ships       []Ship     `json:"ships"`
 	Moves       []Move     `json:"moves"`
 	CreatedAt   time.Time  `json:"created_at"`
+	FinalRoundTrigger *uuid.UUID `json:"-"`
+
+	IsRevanchReady1 bool `json:"-"`
+	IsRevanchReady2 bool `json:"-"`
+
+	isGameOverBroadcasted bool
 }
 
 type GameStore struct {
@@ -138,6 +144,16 @@ func (gs *GameStore) Create(playerID uuid.UUID) *GameRoom {
 	})
 
 	return g
+}
+
+func (gs *GameStore) Lock()    { gs.mu.Lock() }
+func (gs *GameStore) Unlock()  { gs.mu.Unlock() }
+func (gs *GameStore) RLock()   { gs.mu.RLock() }
+func (gs *GameStore) RUnlock() { gs.mu.RUnlock() }
+
+func (gs *GameStore) GetLocked(id uuid.UUID) (*GameRoom, bool) {
+	g, ok := gs.games[id]
+	return g, ok
 }
 
 func (gs *GameStore) Get(id uuid.UUID) (*GameRoom, bool) {
@@ -255,8 +271,10 @@ func (gs *GameStore) All() []*GameRoom {
 }
 
 func (gs *GameStore) CheckAndStart(gameID uuid.UUID) {
+	gs.mu.Lock()
 	g, ok := gs.games[gameID]
 	if !ok || g.Status != "placing_ships" || g.Player2ID == nil {
+		gs.mu.Unlock()
 		return
 	}
 	p1Ships := 0
@@ -264,13 +282,17 @@ func (gs *GameStore) CheckAndStart(gameID uuid.UUID) {
 	for _, s := range g.Ships {
 		if s.PlayerID == g.Player1ID {
 			p1Ships++
-		} else if g.Player2ID != nil && s.PlayerID == *g.Player2ID {
+		} else if s.PlayerID == *g.Player2ID {
 			p2Ships++
 		}
 	}
 	if p1Ships >= 10 && p2Ships >= 10 {
 		g.Status = "playing"
 		g.CurrentTurn = &g.Player1ID
+	}
+	gs.mu.Unlock()
+
+	if p1Ships >= 10 && p2Ships >= 10 {
 		gs.db.SetGameStatus(gs.ctx, gameID, "playing")
 		gs.db.SetGameCurrentTurn(gs.ctx, gameID, g.CurrentTurn)
 	}
@@ -372,9 +394,40 @@ func (gs *GameStore) MakeMove(gameID, playerID uuid.UUID, x, y int) (*GameRoom, 
 		}
 	}
 	if allSunk {
+		if g.FinalRoundTrigger == nil {
+			trigger := playerID
+			g.FinalRoundTrigger = &trigger
+			g.CurrentTurn = &opponentID
+			gs.db.SetGameCurrentTurn(gs.ctx, gameID, g.CurrentTurn)
+			return g, ""
+		}
+		// Player sank opponent's last ship while in final round — check for draw
+		otherAllSunk := true
+		for _, s := range g.Ships {
+			if s.PlayerID == playerID && !s.Sunk {
+				otherAllSunk = false
+				break
+			}
+		}
+		if otherAllSunk {
+			// Both players have all ships sunk — DRAW
+			g.Status = "finished"
+			g.WinnerID = nil
+			gs.db.FinishGameState(gs.ctx, gameID, uuid.Nil)
+			return g, ""
+		}
+		// Opponent was first to sink all, and player didn't sink all opponent's ships
 		g.Status = "finished"
-		g.WinnerID = &playerID
-		gs.db.FinishGameState(gs.ctx, gameID, playerID)
+		g.WinnerID = g.FinalRoundTrigger
+		gs.db.FinishGameState(gs.ctx, gameID, *g.FinalRoundTrigger)
+		return g, ""
+	}
+
+	if g.FinalRoundTrigger != nil {
+		// Final round: player didn't sink opponent's last ship, opponent wins
+		g.Status = "finished"
+		g.WinnerID = g.FinalRoundTrigger
+		gs.db.FinishGameState(gs.ctx, gameID, *g.FinalRoundTrigger)
 		return g, ""
 	}
 

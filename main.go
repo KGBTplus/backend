@@ -194,6 +194,9 @@ func main() {
 
 	r.Get("/ws", srv.HandleWebSocket)
 
+	r.Get("/shop", srv.GetShop)
+	r.Post("/buy_fish", srv.BuyFish)
+	r.Post("/equip_fish", srv.EquipFish)
 	r.Get("/swagger/doc.json", func(w http.ResponseWriter, r *http.Request) {
 		spec, err := api.GetSpecJSON()
 		if err != nil {

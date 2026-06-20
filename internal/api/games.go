@@ -132,7 +132,7 @@ func (s *Server) ForfeitGame(w http.ResponseWriter, r *http.Request, gameID open
 	game.CurrentTurn = nil
 
 	s.Timers.StopAll(uuid.UUID(gameID))
-	s.broadcastGameOver(uuid.UUID(gameID), winnerID, "forfeit")
+	s.broadcastGameOver(uuid.UUID(gameID), winnerID, "forfeit", "win")
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(game)
@@ -169,7 +169,14 @@ func (s *Server) MakeMove(w http.ResponseWriter, r *http.Request, gameID openapi
 	s.broadcastOpponentMoved(uuid.UUID(gameID), userID, req.X, req.Y, game)
 	if game.Status == "finished" {
 		s.Timers.StopAll(uuid.UUID(gameID))
-		s.broadcastGameOver(uuid.UUID(gameID), *game.WinnerID, "all_ships_sunk")
+		result := "win"
+		winnerID := uuid.Nil
+		if game.WinnerID != nil {
+			winnerID = *game.WinnerID
+		} else {
+			result = "draw"
+		}
+		s.broadcastGameOver(uuid.UUID(gameID), winnerID, "all_ships_sunk", result)
 	} else {
 		s.Timers.StopTurn(uuid.UUID(gameID))
 		s.broadcastYourTurn(uuid.UUID(gameID), *game.CurrentTurn)
@@ -189,9 +196,20 @@ func (s *Server) broadcastGameState(gameID uuid.UUID) {
 	if !ok {
 		return
 	}
-	resp := s.gameToMap(context.Background(), game)
 	room.mu.RLock()
 	for _, c := range room.Clients {
+		resp := s.gameToMap(context.Background(), game)
+		var playerShips []Ship
+		var sunkEnemy []Ship
+		for _, ship := range game.Ships {
+			if ship.PlayerID == c.UserID {
+				playerShips = append(playerShips, ship)
+			} else if ship.Sunk {
+				sunkEnemy = append(sunkEnemy, ship)
+			}
+		}
+		resp["ships"] = playerShips
+		resp["sunk_enemy_ships"] = sunkEnemy
 		c.SendJSON(resp)
 	}
 	room.mu.RUnlock()
@@ -442,6 +460,7 @@ func (s *Server) ConfirmShips(w http.ResponseWriter, r *http.Request, gameID ope
 	if beforeStatus != "playing" && gameAfter.Status == "playing" {
 		s.Timers.StopPlacement(uuid.UUID(gameID))
 		s.broadcastGameStarted(uuid.UUID(gameID))
+		s.broadcastYourTurn(uuid.UUID(gameID), *gameAfter.CurrentTurn)
 		s.startTurnTimer(uuid.UUID(gameID))
 	}
 
