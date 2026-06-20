@@ -37,3 +37,30 @@ WHERE id = $1;
 SELECT id, username, password_hash, email, created_at, email_otp_enabled
 FROM users
 WHERE email = $1;
+<<<<<<< HEAD
+=======
+
+-- name: VerifyEmail :exec
+UPDATE users SET email_verified = true WHERE id = $1;
+
+-- name: GetUserByUsernameWithVerified :one
+SELECT id, username, password_hash, email, created_at, email_otp_enabled, COALESCE(email_verified, false)::boolean as email_verified
+FROM users
+WHERE username = $1;
+
+-- name: GetUserByIDWithVerified :one
+SELECT id, username, password_hash, email, created_at, email_otp_enabled, COALESCE(email_verified, false)::boolean as email_verified
+FROM users
+WHERE id = $1;
+
+-- name: GetUserByEmailWithVerified :one
+SELECT id, username, password_hash, email, created_at, email_otp_enabled, COALESCE(email_verified, false)::boolean as email_verified
+FROM users
+WHERE email = $1;
+
+-- name: UpdateUserEmail :exec
+UPDATE users SET email = $2 WHERE id = $1;
+
+-- name: IncrementTokenVersion :exec
+UPDATE users SET token_version = token_version + 1 WHERE id = $1;
+>>>>>>> date-+++

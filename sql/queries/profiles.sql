@@ -2,7 +2,11 @@
 INSERT INTO profiles (user_id) VALUES ($1);
 
 -- name: GetProfile :one
+<<<<<<< HEAD
 SELECT * FROM profiles WHERE user_id = $1;
+=======
+SELECT user_id, total_games, wins, losses, ships_sunk, total_shots, hits FROM profiles WHERE user_id = $1;
+>>>>>>> date-+++
 
 -- name: GetLeaderboard :many
 SELECT

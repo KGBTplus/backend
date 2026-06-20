@@ -1,7 +1,11 @@
 -- name: CreateLobby :one
 INSERT INTO lobbies (id, creator_id, invite_code, max_players)
 VALUES ($1, $2, $3, $4)
+<<<<<<< HEAD
 RETURNING *;
+=======
+RETURNING id, creator_id, status, invite_code, max_players, created_at;
+>>>>>>> date-+++
 
 -- name: GetLobby :one
 SELECT * FROM lobbies WHERE id = $1;
@@ -10,7 +14,11 @@ SELECT * FROM lobbies WHERE id = $1;
 SELECT * FROM lobbies WHERE invite_code = $1 AND status = 'waiting';
 
 -- name: ListLobbies :many
+<<<<<<< HEAD
 SELECT * FROM lobbies
+=======
+SELECT id, creator_id, status, invite_code, max_players, created_at FROM lobbies
+>>>>>>> date-+++
 WHERE (CASE WHEN @status::text = '' THEN true ELSE status = @status END)
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;

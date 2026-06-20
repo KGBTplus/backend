@@ -9,6 +9,10 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+<<<<<<< HEAD
+=======
+	"github.com/lib/pq"
+>>>>>>> date-+++
 )
 
 const createProfile = `-- name: CreateProfile :exec
@@ -112,7 +116,11 @@ func (q *Queries) GetPlayerRank(ctx context.Context, id uuid.UUID) (GetPlayerRan
 }
 
 const getProfile = `-- name: GetProfile :one
+<<<<<<< HEAD
 SELECT user_id, total_games, wins, losses, ships_sunk, total_shots, hits FROM profiles WHERE user_id = $1
+=======
+SELECT user_id, total_games, wins, losses, ships_sunk, total_shots, hits, coins, inventory, active_fish, total_spent, total_earned FROM profiles WHERE user_id = $1
+>>>>>>> date-+++
 `
 
 func (q *Queries) GetProfile(ctx context.Context, userID uuid.UUID) (Profile, error) {
@@ -126,6 +134,14 @@ func (q *Queries) GetProfile(ctx context.Context, userID uuid.UUID) (Profile, er
 		&i.ShipsSunk,
 		&i.TotalShots,
 		&i.Hits,
+<<<<<<< HEAD
+=======
+		&i.Coins,
+		pq.Array(&i.Inventory),
+		pq.Array(&i.ActiveFish),
+		&i.TotalSpent,
+		&i.TotalEarned,
+>>>>>>> date-+++
 	)
 	return i, err
 }

@@ -5,6 +5,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+<<<<<<< HEAD
+=======
+	"sync"
+>>>>>>> date-+++
 	"time"
 
 	"github.com/KGBTplus/backend/internal/api"
@@ -19,6 +23,47 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
+<<<<<<< HEAD
+=======
+// Simple in-memory rate limiter
+type rateLimiter struct {
+	mu       sync.Mutex
+	visitors map[string]int
+	limit    int
+	window   time.Duration
+}
+
+func newRateLimiter(limit int, window time.Duration) *rateLimiter {
+	rl := &rateLimiter{
+		visitors: make(map[string]int),
+		limit:    limit,
+		window:   window,
+	}
+	go rl.cleanup()
+	return rl
+}
+
+func (rl *rateLimiter) cleanup() {
+	for {
+		time.Sleep(rl.window)
+		rl.mu.Lock()
+		rl.visitors = make(map[string]int)
+		rl.mu.Unlock()
+	}
+}
+
+func (rl *rateLimiter) Allow(key string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	count := rl.visitors[key]
+	if count >= rl.limit {
+		return false
+	}
+	rl.visitors[key] = count + 1
+	return true
+}
+
+>>>>>>> date-+++
 func runMigrations(db *sql.DB) {
 	if err := goose.SetDialect("postgres"); err != nil {
 		log.Fatal(err)
@@ -71,12 +116,25 @@ func main() {
 	}
 
 	// 3. Инициализация сервера
+<<<<<<< HEAD
 	jwtSecret := getEnv("JWT_SECRET", "my_secret_key")
 	srv := api.NewServer(queries, smtpCfg, jwtSecret)
+=======
+	jwtSecret := getEnv("JWT_SECRET", "")
+	if len(jwtSecret) < 32 {
+		log.Fatal("JWT_SECRET должен быть не менее 32 символов. Задайте переменную окружения JWT_SECRET.")
+	}
+	secureCookies := os.Getenv("ENV") == "production" || os.Getenv("SECURE_COOKIES") == "true"
+	srv := api.NewServer(queries, smtpCfg, jwtSecret, api.WithSecureCookies(secureCookies))
+
+	// Rate limiter: 10 запросов в секунду на IP для auth
+	authLimiter := newRateLimiter(10, time.Second)
+>>>>>>> date-+++
 
 	// 4. Настройка роутера
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
+<<<<<<< HEAD
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
@@ -95,11 +153,52 @@ func main() {
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return
+=======
+		AllowedOrigins:   []string{"http://localhost:8080", "http://localhost:5173", "https://team4.verstack.ru"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+		AllowCredentials: true,
+	}))
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+
+	// Безопасность: заголовки
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("X-Frame-Options", "DENY")
+			w.Header().Set("Referrer-Policy", "no-referrer")
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:")
+			next.ServeHTTP(w, r)
+		})
+	})
+
+	// Проверка Origin для защиты от CSRF
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			// Разрешаем POST-запросы без Origin только от тех же хостов
+			if r.Method == "POST" && origin != "" {
+				allowedOrigins := []string{"http://localhost:8080", "http://localhost:5173", "https://team4.verstack.ru"}
+				ok := false
+				for _, o := range allowedOrigins {
+					if o == origin {
+						ok = true
+						break
+					}
+				}
+				if !ok {
+					http.Error(w, "Forbidden", http.StatusForbidden)
+					return
+				}
+>>>>>>> date-+++
 			}
 			next.ServeHTTP(w, r)
 		})
 	})
 
+<<<<<<< HEAD
 	// 5. API руты
 	api.HandlerFromMux(srv, r)
 	r.Post("/auth/verify-email", srv.VerifyEmail)
@@ -117,6 +216,44 @@ func main() {
 		spec, err := api.GetSpecJSON()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+=======
+	// 5. API руты (auth endpoints under rate limiter)
+	r.Group(func(r chi.Router) {
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ip := r.RemoteAddr
+				if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+					ip = forwarded
+				}
+				if !authLimiter.Allow("auth:" + ip) {
+					http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+					return
+				}
+				next.ServeHTTP(w, r)
+			})
+		})
+		api.HandlerFromMux(srv, r)
+		r.Post("/auth/verify-email", srv.VerifyEmail)
+		r.Post("/auth/verify-otp", srv.VerifyOTP)
+		r.Post("/auth/password/forgot/send-code", srv.SendForgotPasswordCode)
+		r.Post("/auth/password/forgot/reset", srv.ResetForgotPassword)
+		r.Get("/auth/me", srv.AuthMe)
+		r.Post("/auth/refresh", srv.RefreshToken)
+		r.Get("/auth/ws-token", srv.WsToken)
+		r.Post("/auth/logout", srv.Logout)
+	})
+
+	r.Get("/ws", srv.HandleWebSocket)
+
+	r.Get("/shop", srv.GetShop)
+	r.Post("/buy_fish", srv.BuyFish)
+	r.Post("/equip_fish", srv.EquipFish)
+	r.Get("/swagger/doc.json", func(w http.ResponseWriter, r *http.Request) {
+		spec, err := api.GetSpecJSON()
+		if err != nil {
+			log.Printf("Ошибка получения swagger spec: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+>>>>>>> date-+++
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")

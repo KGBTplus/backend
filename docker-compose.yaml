@@ -33,7 +33,11 @@ services:
       - "8080:8080"
     environment:
       DATABASE_URL: postgres://user:password@db:5432/game?sslmode=disable
+<<<<<<< HEAD
       JWT_SECRET: my_secret_key
+=======
+      JWT_SECRET: ${JWT_SECRET}
+>>>>>>> date-+++
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
@@ -52,7 +56,11 @@ services:
     container_name: game_frontend
     restart: always
     ports:
+<<<<<<< HEAD
       - "5173:5173"
+=======
+      - "5173:80"
+>>>>>>> date-+++
     environment:
       VITE_API_URL: http://localhost:8080
     depends_on:

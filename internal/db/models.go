@@ -30,6 +30,7 @@ type MatchmakingQueue struct {
 }
 
 type Profile struct {
+<<<<<<< HEAD
 	UserID     uuid.UUID
 	TotalGames int32
 	Wins       int32
@@ -37,6 +38,20 @@ type Profile struct {
 	ShipsSunk  int32
 	TotalShots int32
 	Hits       int32
+=======
+	UserID      uuid.UUID
+	TotalGames  int32
+	Wins        int32
+	Losses      int32
+	ShipsSunk   int32
+	TotalShots  int32
+	Hits        int32
+	Coins       int32
+	Inventory   []string
+	ActiveFish  []string
+	TotalSpent  int32
+	TotalEarned int32
+>>>>>>> date-+++
 }
 
 type User struct {
@@ -47,4 +62,8 @@ type User struct {
 	Email           string
 	EmailOtpEnabled bool
 	EmailVerified   bool
+<<<<<<< HEAD
+=======
+	TokenVersion    int32
+>>>>>>> date-+++
 }

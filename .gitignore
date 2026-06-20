@@ -1,2 +1,7 @@
 .env
 *.exe
+<<<<<<< HEAD
+=======
+server
+deploy/secret.yaml
+>>>>>>> date-+++

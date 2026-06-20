@@ -1,9 +1,17 @@
 package api
 
 import (
+<<<<<<< HEAD
 	"sync"
 	"time"
 
+=======
+	"context"
+	"sync"
+	"time"
+
+	"github.com/KGBTplus/backend/internal/db"
+>>>>>>> date-+++
 	"github.com/google/uuid"
 )
 
@@ -22,6 +30,10 @@ type Ship struct {
 	Horizontal bool      `json:"horizontal"`
 	Cells      []Cell    `json:"cells"`
 	Sunk       bool      `json:"sunk"`
+<<<<<<< HEAD
+=======
+	DBID       *uuid.UUID `json:"-"`
+>>>>>>> date-+++
 }
 
 type Move struct {
@@ -43,6 +55,7 @@ type GameRoom struct {
 	Ships       []Ship     `json:"ships"`
 	Moves       []Move     `json:"moves"`
 	CreatedAt   time.Time  `json:"created_at"`
+<<<<<<< HEAD
 }
 
 type GameStore struct {
@@ -53,6 +66,82 @@ type GameStore struct {
 func NewGameStore() *GameStore {
 	return &GameStore{
 		games: make(map[uuid.UUID]*GameRoom),
+=======
+	FinalRoundTrigger *uuid.UUID `json:"-"`
+
+	IsRevanchReady1 bool `json:"-"`
+	IsRevanchReady2 bool `json:"-"`
+
+	isGameOverBroadcasted bool
+}
+
+type GameStore struct {
+	mu      sync.RWMutex
+	games   map[uuid.UUID]*GameRoom
+	db      *db.Queries
+	ctx     context.Context
+}
+
+func NewGameStore(dbq *db.Queries) *GameStore {
+	gs := &GameStore{
+		games: make(map[uuid.UUID]*GameRoom),
+		db:    dbq,
+		ctx:   context.Background(),
+	}
+	gs.loadFromDB()
+	return gs
+}
+
+func (gs *GameStore) loadFromDB() {
+	rows, err := gs.db.GetAllActiveGames(gs.ctx)
+	if err != nil {
+		return
+	}
+	for _, r := range rows {
+		game := &GameRoom{
+			ID:          r.ID,
+			Player1ID:   r.Player1ID,
+			Player2ID:   r.Player2ID,
+			Status:      r.Status,
+			CurrentTurn: r.CurrentTurn,
+			WinnerID:    r.WinnerID,
+			CreatedAt:   r.CreatedAt,
+			Ships:       []Ship{},
+			Moves:       []Move{},
+		}
+
+		shipRows, _ := gs.db.GetGameShips(gs.ctx, r.ID)
+		for _, sr := range shipRows {
+			ship := Ship{
+				ID:         uuid.New(),
+				PlayerID:   sr.PlayerID,
+				ShipType:   int(sr.ShipType),
+				StartX:     int(sr.StartX),
+				StartY:     int(sr.StartY),
+				Horizontal: sr.Horizontal,
+				Sunk:       sr.Sunk,
+				Cells:      buildCells(int(sr.StartX), int(sr.StartY), int(sr.ShipType), sr.Horizontal),
+			}
+			dbID := sr.ID
+			ship.DBID = &dbID
+			game.Ships = append(game.Ships, ship)
+		}
+
+		moveRows, _ := gs.db.GetGameMoves(gs.ctx, r.ID)
+		for _, mr := range moveRows {
+			move := Move{
+				ID:         mr.ID,
+				PlayerID:   mr.PlayerID,
+				X:          int(mr.X),
+				Y:          int(mr.Y),
+				Hit:        mr.Hit,
+				SunkShipID: mr.SunkShipID,
+			}
+			game.Moves = append(game.Moves, move)
+		}
+
+		gs.games[r.ID] = game
+>>>>>>> date-+++
 	}
 }
 
@@ -68,9 +157,33 @@ func (gs *GameStore) Create(playerID uuid.UUID) *GameRoom {
 	gs.mu.Lock()
 	gs.games[g.ID] = g
 	gs.mu.Unlock()
+<<<<<<< HEAD
 	return g
 }
 
+=======
+
+	gs.db.CreateGameState(gs.ctx, db.CreateGameStateParams{
+		ID:        g.ID,
+		Player1ID: g.Player1ID,
+		Status:    g.Status,
+		CreatedAt: g.CreatedAt,
+	})
+
+	return g
+}
+
+func (gs *GameStore) Lock()    { gs.mu.Lock() }
+func (gs *GameStore) Unlock()  { gs.mu.Unlock() }
+func (gs *GameStore) RLock()   { gs.mu.RLock() }
+func (gs *GameStore) RUnlock() { gs.mu.RUnlock() }
+
+func (gs *GameStore) GetLocked(id uuid.UUID) (*GameRoom, bool) {
+	g, ok := gs.games[id]
+	return g, ok
+}
+
+>>>>>>> date-+++
 func (gs *GameStore) Get(id uuid.UUID) (*GameRoom, bool) {
 	gs.mu.RLock()
 	g, ok := gs.games[id]
@@ -113,9 +226,27 @@ func (gs *GameStore) Join(gameID, playerID uuid.UUID) bool {
 	g.Player2ID = &playerID
 	g.Status = "placing_ships"
 	g.CurrentTurn = &g.Player1ID
+<<<<<<< HEAD
 	return true
 }
 
+=======
+
+	gs.db.UpdateGameState(gs.ctx, db.UpdateGameStateParams{
+		ID:          g.ID,
+		Player2ID:   g.Player2ID,
+		Status:      g.Status,
+		CurrentTurn: g.CurrentTurn,
+	})
+
+	return true
+}
+
+func (gs *GameStore) DeletePlayerShips(gameID, playerID uuid.UUID) {
+	gs.db.DeletePlayerShips(gs.ctx, gameID, playerID)
+}
+
+>>>>>>> date-+++
 func (gs *GameStore) PlaceShips(gameID, playerID uuid.UUID, ships []Ship) bool {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
@@ -129,18 +260,29 @@ func (gs *GameStore) PlaceShips(gameID, playerID uuid.UUID, ships []Ship) bool {
 	if g.Player1ID != playerID && (g.Player2ID == nil || *g.Player2ID != playerID) {
 		return false
 	}
+<<<<<<< HEAD
+=======
+
+	// Удаляем старые корабли игрока из БД
+	gs.db.DeletePlayerShips(gs.ctx, gameID, playerID)
+>>>>>>> date-+++
 	var kept []Ship
 	for _, s := range g.Ships {
 		if s.PlayerID != playerID {
 			kept = append(kept, s)
 		}
 	}
+<<<<<<< HEAD
 	g.Ships = kept
+=======
+
+>>>>>>> date-+++
 	for i := range ships {
 		ships[i].ID = uuid.New()
 		ships[i].PlayerID = playerID
 		ships[i].Cells = buildCells(ships[i].StartX, ships[i].StartY, ships[i].ShipType, ships[i].Horizontal)
 		ships[i].Sunk = false
+<<<<<<< HEAD
 	}
 	g.Ships = append(g.Ships, ships...)
 	placedCount := 0
@@ -157,6 +299,24 @@ func (gs *GameStore) PlaceShips(gameID, playerID uuid.UUID, ships []Ship) bool {
 			}
 		}
 	}
+=======
+
+		shipID := uuid.New()
+		ships[i].DBID = &shipID
+		gs.db.CreateShip(gs.ctx, db.CreateShipParams{
+			ID:         shipID,
+			GameID:     gameID,
+			PlayerID:   playerID,
+			ShipType:   int32(ships[i].ShipType),
+			StartX:     int32(ships[i].StartX),
+			StartY:     int32(ships[i].StartY),
+			Horizontal: ships[i].Horizontal,
+			Sunk:       false,
+		})
+	}
+
+	g.Ships = append(kept, ships...)
+>>>>>>> date-+++
 	return true
 }
 
@@ -171,8 +331,15 @@ func (gs *GameStore) All() []*GameRoom {
 }
 
 func (gs *GameStore) CheckAndStart(gameID uuid.UUID) {
+<<<<<<< HEAD
 	g, ok := gs.games[gameID]
 	if !ok || g.Status != "placing_ships" || g.Player2ID == nil {
+=======
+	gs.mu.Lock()
+	g, ok := gs.games[gameID]
+	if !ok || g.Status != "placing_ships" || g.Player2ID == nil {
+		gs.mu.Unlock()
+>>>>>>> date-+++
 		return
 	}
 	p1Ships := 0
@@ -180,7 +347,11 @@ func (gs *GameStore) CheckAndStart(gameID uuid.UUID) {
 	for _, s := range g.Ships {
 		if s.PlayerID == g.Player1ID {
 			p1Ships++
+<<<<<<< HEAD
 		} else if g.Player2ID != nil && s.PlayerID == *g.Player2ID {
+=======
+		} else if s.PlayerID == *g.Player2ID {
+>>>>>>> date-+++
 			p2Ships++
 		}
 	}
@@ -188,6 +359,15 @@ func (gs *GameStore) CheckAndStart(gameID uuid.UUID) {
 		g.Status = "playing"
 		g.CurrentTurn = &g.Player1ID
 	}
+<<<<<<< HEAD
+=======
+	gs.mu.Unlock()
+
+	if p1Ships >= 10 && p2Ships >= 10 {
+		gs.db.SetGameStatus(gs.ctx, gameID, "playing")
+		gs.db.SetGameCurrentTurn(gs.ctx, gameID, g.CurrentTurn)
+	}
+>>>>>>> date-+++
 }
 
 func (gs *GameStore) MakeMove(gameID, playerID uuid.UUID, x, y int) (*GameRoom, string) {
@@ -220,6 +400,10 @@ func (gs *GameStore) MakeMove(gameID, playerID uuid.UUID, x, y int) (*GameRoom, 
 
 	hit := false
 	var sunkShipID *uuid.UUID
+<<<<<<< HEAD
+=======
+	var sunkDBID *uuid.UUID
+>>>>>>> date-+++
 
 	for i := range g.Ships {
 		s := &g.Ships[i]
@@ -241,6 +425,12 @@ func (gs *GameStore) MakeMove(gameID, playerID uuid.UUID, x, y int) (*GameRoom, 
 				if allHit {
 					s.Sunk = true
 					sunkShipID = &s.ID
+<<<<<<< HEAD
+=======
+					if s.DBID != nil {
+						sunkDBID = s.DBID
+					}
+>>>>>>> date-+++
 				}
 				break
 			}
@@ -260,6 +450,23 @@ func (gs *GameStore) MakeMove(gameID, playerID uuid.UUID, x, y int) (*GameRoom, 
 	}
 	g.Moves = append(g.Moves, move)
 
+<<<<<<< HEAD
+=======
+	gs.db.CreateMove(gs.ctx, db.CreateMoveParams{
+		ID:         move.ID,
+		GameID:     gameID,
+		PlayerID:   playerID,
+		X:          int32(x),
+		Y:          int32(y),
+		Hit:        hit,
+		SunkShipID: sunkDBID,
+	})
+
+	if sunkDBID != nil {
+		gs.db.SetShipSunk(gs.ctx, *sunkDBID)
+	}
+
+>>>>>>> date-+++
 	allSunk := true
 	for _, s := range g.Ships {
 		if s.PlayerID == opponentID && !s.Sunk {
@@ -268,8 +475,45 @@ func (gs *GameStore) MakeMove(gameID, playerID uuid.UUID, x, y int) (*GameRoom, 
 		}
 	}
 	if allSunk {
+<<<<<<< HEAD
 		g.Status = "finished"
 		g.WinnerID = &playerID
+=======
+		if g.FinalRoundTrigger == nil {
+			trigger := playerID
+			g.FinalRoundTrigger = &trigger
+			g.CurrentTurn = &opponentID
+			gs.db.SetGameCurrentTurn(gs.ctx, gameID, g.CurrentTurn)
+			return g, ""
+		}
+		// Player sank opponent's last ship while in final round — check for draw
+		otherAllSunk := true
+		for _, s := range g.Ships {
+			if s.PlayerID == playerID && !s.Sunk {
+				otherAllSunk = false
+				break
+			}
+		}
+		if otherAllSunk {
+			// Both players have all ships sunk — DRAW
+			g.Status = "finished"
+			g.WinnerID = nil
+			gs.db.FinishGameState(gs.ctx, gameID, uuid.Nil)
+			return g, ""
+		}
+		// Opponent was first to sink all, and player didn't sink all opponent's ships
+		g.Status = "finished"
+		g.WinnerID = g.FinalRoundTrigger
+		gs.db.FinishGameState(gs.ctx, gameID, *g.FinalRoundTrigger)
+		return g, ""
+	}
+
+	if g.FinalRoundTrigger != nil {
+		// Final round: player didn't sink opponent's last ship, opponent wins
+		g.Status = "finished"
+		g.WinnerID = g.FinalRoundTrigger
+		gs.db.FinishGameState(gs.ctx, gameID, *g.FinalRoundTrigger)
+>>>>>>> date-+++
 		return g, ""
 	}
 
@@ -279,6 +523,10 @@ func (gs *GameStore) MakeMove(gameID, playerID uuid.UUID, x, y int) (*GameRoom, 
 		} else {
 			g.CurrentTurn = &g.Player1ID
 		}
+<<<<<<< HEAD
+=======
+		gs.db.SetGameCurrentTurn(gs.ctx, gameID, g.CurrentTurn)
+>>>>>>> date-+++
 	}
 
 	return g, ""
