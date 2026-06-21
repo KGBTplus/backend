@@ -56,6 +56,10 @@ type MatchFoundData struct {
 type GameStartedData struct {
 	GameID      string `json:"game_id"`
 	CurrentTurn string `json:"current_turn"`
+	Player1ID   string `json:"player1_id"`
+	Player2ID   string `json:"player2_id,omitempty"`
+	Player1Name string `json:"player1_name"`
+	Player2Name string `json:"player2_name"`
 }
 
 type OpponentMovedData struct {
@@ -91,6 +95,10 @@ type GameOverData struct {
 	Hits2          int    `json:"hits2"`
 	PerfectWin1    bool   `json:"perfect_win1"`
 	PerfectWin2    bool   `json:"perfect_win2"`
+	Player1ID      string `json:"player1_id"`
+	Player2ID      string `json:"player2_id,omitempty"`
+	NewBalance1    int    `json:"new_balance1"`
+	NewBalance2    int    `json:"new_balance2"`
 }
 
 type RematchData struct {
@@ -247,13 +255,14 @@ func (h *Hub) RegisterClient(c *Client) {
 	h.mu.Unlock()
 }
 
-func (h *Hub) UnregisterClient(userID uuid.UUID) {
+func (h *Hub) UnregisterClient(client *Client) {
 	h.mu.Lock()
-	client, ok := h.clients[userID]
-	if ok && client.Room != nil {
-		client.Room.RemoveClient(userID)
+	if existing, ok := h.clients[client.UserID]; ok && existing == client {
+		if client.Room != nil {
+			client.Room.RemoveClient(client.UserID)
+		}
+		delete(h.clients, client.UserID)
 	}
-	delete(h.clients, userID)
 	h.mu.Unlock()
 }
 
@@ -289,7 +298,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, err := s.parseJWT(tokenStr)
+	userID, err := s.parseWSJWT(tokenStr)
 	if err != nil {
 		http.Error(w, "Invalid token", http.StatusUnauthorized)
 		return
@@ -337,12 +346,49 @@ func (s *Server) parseJWT(tokenStr string) (uuid.UUID, error) {
 	return uuid.Parse(sub)
 }
 
+func (s *Server) parseWSJWT(tokenStr string) (uuid.UUID, error) {
+	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return s.JWTKey, nil
+	})
+	if err != nil || !token.Valid {
+		return uuid.Nil, err
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return uuid.Nil, jwt.ErrSignatureInvalid
+	}
+	sub, ok := claims["sub"].(string)
+	if !ok {
+		return uuid.Nil, jwt.ErrSignatureInvalid
+	}
+	userID := uuid.MustParse(sub)
+
+	if tv, hasVersion := claims["token_version"]; hasVersion {
+		expectedVersion, ok := tv.(float64)
+		if !ok {
+			return uuid.Nil, jwt.ErrSignatureInvalid
+		}
+		user, err := s.DB.GetUserWithTokenVersion(context.Background(), userID)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		if int32(expectedVersion) != user.TokenVersion {
+			return uuid.Nil, fmt.Errorf("token revoked")
+		}
+	}
+
+	return userID, nil
+}
+
 // ---------- read / write pumps ----------
 
 func (c *Client) readPump() {
 	defer func() {
 		c.Server.handleClientDisconnect(c)
-		c.Server.Hub.UnregisterClient(c.UserID)
+		c.Server.Hub.UnregisterClient(c)
 		c.Conn.Close()
 	}()
 
@@ -367,7 +413,11 @@ func (c *Client) readPump() {
 
 		// Send full game state so frontend can render current board
 		resp := c.Server.gameToMap(context.Background(), activeGame)
-		c.SendJSON(resp)
+		resp["ships"] = filterShipsByPlayer(activeGame.Ships, c.UserID)
+		c.SendJSON(WSMessage{
+			Type: "game_state",
+			Data: mustJSON(resp),
+		})
 
 		// Send synthetic timer_tick so joiner sees remaining placement time
 		if activeGame.Status == "placing_ships" {
@@ -385,8 +435,7 @@ func (c *Client) readPump() {
 			})
 		}
 	} else {
-		log.Printf("[WS readPump] user=%s no active game found, sending matchmaking_searching", c.UserID)
-		c.SendJSON(WSMessage{Type: "matchmaking_searching"})
+		log.Printf("[WS readPump] user=%s no active game found", c.UserID)
 	}
 
 	for {

@@ -122,7 +122,7 @@ func (s *Server) ResetForgotPassword(w http.ResponseWriter, r *http.Request) {
 
 	user, err := s.DB.GetUserByUsernameWithVerified(r.Context(), req.Username)
 	if err != nil {
-		sendError(w, http.StatusUnauthorized, "Пользователь не найден")
+		sendError(w, http.StatusUnauthorized, "Неверный код или пользователь не найден")
 		return
 	}
 

@@ -12,6 +12,8 @@ SELECT
     p.wins,
     p.losses,
     p.total_games,
+    p.total_earned,
+    p.total_spent,
     CASE WHEN p.total_games > 0 THEN (p.wins::float8 / p.total_games * 100)::float8 ELSE 0::float8 END AS win_rate,
     CASE WHEN p.total_shots > 0 THEN (p.hits::float8 / p.total_shots * 100)::float8 ELSE 0::float8 END AS hit_rate
 FROM profiles p
@@ -20,7 +22,7 @@ ORDER BY p.wins DESC
 LIMIT $1;
 
 -- name: GetPlayerRank :one
-SELECT u.id, u.username, p.wins, p.losses, p.total_games, p.total_shots, p.hits
+SELECT u.id, u.username, p.wins, p.losses, p.total_games, p.total_shots, p.hits, p.total_earned, p.total_spent
 FROM profiles p
 JOIN users u ON u.id = p.user_id
 WHERE u.id = $1;

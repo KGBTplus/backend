@@ -29,6 +29,8 @@ SELECT
     p.wins,
     p.losses,
     p.total_games,
+    p.total_earned,
+    p.total_spent,
     CASE WHEN p.total_games > 0 THEN (p.wins::float8 / p.total_games * 100)::float8 ELSE 0::float8 END AS win_rate,
     CASE WHEN p.total_shots > 0 THEN (p.hits::float8 / p.total_shots * 100)::float8 ELSE 0::float8 END AS hit_rate
 FROM profiles p
@@ -38,14 +40,16 @@ LIMIT $1
 `
 
 type GetLeaderboardRow struct {
-	Rank       int64
-	PlayerID   uuid.UUID
-	Username   string
-	Wins       int32
-	Losses     int32
-	TotalGames int32
-	WinRate    float64
-	HitRate    float64
+	Rank         int64
+	PlayerID     uuid.UUID
+	Username     string
+	Wins         int32
+	Losses       int32
+	TotalGames   int32
+	TotalEarned  int32
+	TotalSpent   int32
+	WinRate      float64
+	HitRate      float64
 }
 
 func (q *Queries) GetLeaderboard(ctx context.Context, limit int32) ([]GetLeaderboardRow, error) {
@@ -64,6 +68,8 @@ func (q *Queries) GetLeaderboard(ctx context.Context, limit int32) ([]GetLeaderb
 			&i.Wins,
 			&i.Losses,
 			&i.TotalGames,
+			&i.TotalEarned,
+			&i.TotalSpent,
 			&i.WinRate,
 			&i.HitRate,
 		); err != nil {
@@ -81,20 +87,22 @@ func (q *Queries) GetLeaderboard(ctx context.Context, limit int32) ([]GetLeaderb
 }
 
 const getPlayerRank = `-- name: GetPlayerRank :one
-SELECT u.id, u.username, p.wins, p.losses, p.total_games, p.total_shots, p.hits
+SELECT u.id, u.username, p.wins, p.losses, p.total_games, p.total_shots, p.hits, p.total_earned, p.total_spent
 FROM profiles p
 JOIN users u ON u.id = p.user_id
 WHERE u.id = $1
 `
 
 type GetPlayerRankRow struct {
-	ID         uuid.UUID
-	Username   string
-	Wins       int32
-	Losses     int32
-	TotalGames int32
-	TotalShots int32
-	Hits       int32
+	ID          uuid.UUID
+	Username    string
+	Wins        int32
+	Losses      int32
+	TotalGames  int32
+	TotalShots  int32
+	Hits        int32
+	TotalEarned int32
+	TotalSpent  int32
 }
 
 func (q *Queries) GetPlayerRank(ctx context.Context, id uuid.UUID) (GetPlayerRankRow, error) {
@@ -108,12 +116,14 @@ func (q *Queries) GetPlayerRank(ctx context.Context, id uuid.UUID) (GetPlayerRan
 		&i.TotalGames,
 		&i.TotalShots,
 		&i.Hits,
+		&i.TotalEarned,
+		&i.TotalSpent,
 	)
 	return i, err
 }
 
 const getProfile = `-- name: GetProfile :one
-SELECT user_id, total_games, wins, losses, ships_sunk, total_shots, hits, coins, inventory, active_fish, total_spent, total_earned FROM profiles WHERE user_id = $1
+SELECT user_id, total_games, wins, losses, ships_sunk, total_shots, hits, coins, inventory, active_fish, total_spent, total_earned, time_in_battle FROM profiles WHERE user_id = $1
 `
 
 func (q *Queries) GetProfile(ctx context.Context, userID uuid.UUID) (Profile, error) {
@@ -132,6 +142,7 @@ func (q *Queries) GetProfile(ctx context.Context, userID uuid.UUID) (Profile, er
 		pq.Array(&i.ActiveFish),
 		&i.TotalSpent,
 		&i.TotalEarned,
+		&i.TimeInBattle,
 	)
 	return i, err
 }

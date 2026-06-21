@@ -83,27 +83,7 @@ func (s *Server) CreateLobby(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try to find an existing waiting lobby (not owned by this user) and auto-join it
-	existing, err := s.DB.ListLobbies(r.Context(), db.ListLobbiesParams{
-		Limit:  100,
-		Offset: 0,
-		Status: "waiting",
-	})
-	if err == nil {
-		for _, l := range existing {
-			if l.CreatorID != userID {
-				exists, _ := s.DB.IsPlayerInLobby(r.Context(), db.IsPlayerInLobbyParams{
-					LobbyID:  l.ID,
-					PlayerID: userID,
-				})
-				if !exists {
-					s.JoinLobby(w, r, openapi_types.UUID(l.ID))
-					return
-				}
-			}
-		}
-	}
-
+	// Always create a new lobby (don't auto-join stale lobbies)
 	l, err := s.DB.CreateLobby(r.Context(), db.CreateLobbyParams{
 		ID:         uuid.New(),
 		CreatorID:  userID,

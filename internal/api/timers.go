@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/KGBTplus/backend/internal/db"
 	"github.com/google/uuid"
 )
 
@@ -164,6 +165,7 @@ func (s *Server) handleGameOverTimeout(gameID uuid.UUID) {
 	if g, ok := s.Games.GetLocked(gameID); ok {
 		g.IsRevanchReady1 = false
 		g.IsRevanchReady2 = false
+		g.RematchInProgress = false
 	}
 	s.Games.Unlock()
 
@@ -200,6 +202,10 @@ func (s *Server) handlePlacementTimeout(gameID uuid.UUID) {
 		return
 	}
 
+	// Force both players ready on timeout
+	game.IsPlacingReady1 = true
+	game.IsPlacingReady2 = true
+
 	p1Ships := countPlayerShips(game, game.Player1ID)
 	p2Ships := 0
 	if game.Player2ID != nil {
@@ -215,6 +221,9 @@ func (s *Server) handlePlacementTimeout(gameID uuid.UUID) {
 			generated[i].ID = uuid.New()
 			generated[i].PlayerID = game.Player1ID
 			generated[i].Cells = buildCells(generated[i].StartX, generated[i].StartY, generated[i].ShipType, generated[i].Horizontal)
+			generated[i].Sunk = false
+			shipID := uuid.New()
+			generated[i].DBID = &shipID
 		}
 		game.Ships = append(game.Ships, generated...)
 		notifyP1 = true
@@ -226,14 +235,39 @@ func (s *Server) handlePlacementTimeout(gameID uuid.UUID) {
 			generated[i].ID = uuid.New()
 			generated[i].PlayerID = *game.Player2ID
 			generated[i].Cells = buildCells(generated[i].StartX, generated[i].StartY, generated[i].ShipType, generated[i].Horizontal)
+			generated[i].Sunk = false
+			shipID := uuid.New()
+			generated[i].DBID = &shipID
 		}
 		game.Ships = append(game.Ships, generated...)
 		notifyP2 = true
 	}
 
 	game.Status = "playing"
-	game.CurrentTurn = &game.Player1ID
+	if game.Player2ID != nil && rand.Intn(2) == 0 {
+		game.CurrentTurn = game.Player2ID
+	} else {
+		game.CurrentTurn = &game.Player1ID
+	}
 	s.Games.Unlock()
+
+	// Persist auto-generated ships to DB
+	for _, ship := range game.Ships {
+		if ship.DBID != nil && ship.PlayerID != uuid.Nil {
+			if (notifyP1 && ship.PlayerID == game.Player1ID) || (notifyP2 && game.Player2ID != nil && ship.PlayerID == *game.Player2ID) {
+				s.Games.db.CreateShip(s.Games.ctx, db.CreateShipParams{
+					ID:         *ship.DBID,
+					GameID:     gameID,
+					PlayerID:   ship.PlayerID,
+					ShipType:   int32(ship.ShipType),
+					StartX:     int32(ship.StartX),
+					StartY:     int32(ship.StartY),
+					Horizontal: ship.Horizontal,
+					Sunk:       false,
+				})
+			}
+		}
+	}
 
 	room := s.Hub.GetRoom(gameID)
 	if room != nil {
@@ -410,20 +444,42 @@ func (s *Server) handleForceLeaveToLobby(c *Client) {
 
 	gameID := c.Room.GameID
 
-	otherClient := c.Room.GetOtherClient(c.UserID)
-	if otherClient != nil {
-		otherClient.SendJSON(WSMessage{
-			Type: "opponent_left",
+	// Check if game is already finished — other player should stay
+	s.Games.Lock()
+	game, ok := s.Games.GetLocked(gameID)
+	isFinished := ok && game.Status == "finished"
+	s.Games.Unlock()
+
+	if isFinished {
+		// Game is over — just detach this client, don't disturb the other
+		c.Room.RemoveClient(c.UserID)
+		c.Room = nil
+		c.SendJSON(WSMessage{
+			Type: "force_leave_to_lobby",
 			Data: mustJSON(map[string]string{
-				"message": "Соперник покинул игру",
+				"message": "Вы покинули игру",
 			}),
 		})
+		return
+	} else {
+		// Game in progress — notify the other player they're alone
+		otherClient := c.Room.GetOtherClient(c.UserID)
+		if otherClient != nil {
+			otherClient.SendJSON(WSMessage{
+				Type: "opponent_left",
+				Data: mustJSON(map[string]string{
+					"message": "Соперник покинул игру",
+				}),
+			})
+		}
 	}
 
 	c.Room.RemoveClient(c.UserID)
 	c.Room = nil
 
-	s.Timers.StopGameOver(gameID)
+	if !isFinished {
+		s.Timers.StopGameOver(gameID)
+	}
 
 	c.SendJSON(WSMessage{
 		Type: "force_leave_to_lobby",
@@ -436,6 +492,7 @@ func (s *Server) handleForceLeaveToLobby(c *Client) {
 	if game, ok := s.Games.GetLocked(gameID); ok {
 		game.IsRevanchReady1 = false
 		game.IsRevanchReady2 = false
+		game.RematchInProgress = false
 	}
 	s.Games.Unlock()
 }
@@ -449,7 +506,7 @@ func (s *Server) handleToggleRevanch(c *Client) {
 
 	s.Games.Lock()
 	game, ok := s.Games.GetLocked(gameID)
-	if !ok || game.Status != "finished" {
+	if !ok || game.Status != "finished" || game.RematchInProgress {
 		s.Games.Unlock()
 		return
 	}
@@ -465,6 +522,10 @@ func (s *Server) handleToggleRevanch(c *Client) {
 
 	ready1 := game.IsRevanchReady1
 	ready2 := game.IsRevanchReady2
+
+	if ready1 && ready2 {
+		game.RematchInProgress = true
+	}
 	s.Games.Unlock()
 
 	room := s.Hub.GetRoom(gameID)
@@ -563,7 +624,33 @@ func (s *Server) handleLeaveLobby(c *Client) {
 
 	gameID := c.Room.GameID
 
+	s.Games.Lock()
+	game, ok := s.Games.GetLocked(gameID)
+	isCreator := ok && game.Player1ID == c.UserID
+	gameStatus := ""
+	if ok {
+		gameStatus = game.Status
+	}
+	s.Games.Unlock()
+
 	otherClient := c.Room.GetOtherClient(c.UserID)
+
+	if ok && (gameStatus == "placing_ships" || gameStatus == "waiting") && !isCreator {
+		// Non-creator leaves during placement/waiting — creator stays in the room
+		if otherClient != nil {
+			otherClient.SendJSON(WSMessage{
+				Type: "opponent_left",
+				Data: mustJSON(map[string]string{
+					"message": "Соперник покинул лобби",
+				}),
+			})
+		}
+		c.Room.RemoveClient(c.UserID)
+		c.Room = nil
+		c.SendJSON(WSMessage{Type: "left_lobby"})
+		return
+	}
+
 	if otherClient != nil {
 		otherClient.SendJSON(WSMessage{
 			Type: "opponent_left",
@@ -583,10 +670,11 @@ func (s *Server) handleLeaveLobby(c *Client) {
 		game.Status = "finished"
 		game.IsRevanchReady1 = false
 		game.IsRevanchReady2 = false
+		game.RematchInProgress = false
 	}
 	s.Games.Unlock()
 
-	s.Games.db.SetGameStatus(s.Games.ctx, gameID, "finished")
+	s.Games.db.FinishGameState(s.Games.ctx, gameID, uuid.Nil)
 
 	s.Hub.mu.Lock()
 	delete(s.Hub.rooms, gameID)
@@ -596,6 +684,14 @@ func (s *Server) handleLeaveLobby(c *Client) {
 }
 
 func (s *Server) handleClientDisconnect(c *Client) {
+	ctx := context.Background()
+	s.DB.LeaveMatchmaking(ctx, c.UserID)
+
+	// Delete any lobbies owned by this player (cascade removes their lobby_players entries)
+	s.SQLDB.ExecContext(ctx, `DELETE FROM lobbies WHERE creator_id = $1`, c.UserID)
+	// Remove player from all remaining lobby_players entries (non-creator participation)
+	s.SQLDB.ExecContext(ctx, `DELETE FROM lobby_players WHERE player_id = $1`, c.UserID)
+
 	if c.Room == nil {
 		return
 	}
@@ -615,7 +711,8 @@ func (s *Server) handleClientDisconnect(c *Client) {
 	shouldBroadcastGameOver := false
 	shouldFinish := false
 
-	if gameStatus == "playing" {
+	switch gameStatus {
+	case "playing":
 		if game.Player1ID == c.UserID && game.Player2ID != nil {
 			winnerID = *game.Player2ID
 		} else if game.Player1ID != c.UserID {
@@ -626,13 +723,21 @@ func (s *Server) handleClientDisconnect(c *Client) {
 			game.WinnerID = &winnerID
 			shouldBroadcastGameOver = true
 		}
-	} else {
+	case "placing_ships", "waiting":
+		// Don't finish the game — just detach the client.
+		// The placement timer will handle timeouts and auto-generate ships.
+		// The other player can reconnect.
+	default:
 		game.Status = "finished"
 		shouldFinish = true
 	}
 	s.Games.Unlock()
 
-	s.Timers.StopAll(gameID)
+	if shouldFinish || shouldBroadcastGameOver {
+		s.Timers.StopAll(gameID)
+	} else if gameStatus != "placing_ships" && gameStatus != "waiting" {
+		s.Timers.StopPlacement(gameID)
+	}
 
 	otherClient := c.Room.GetOtherClient(c.UserID)
 	if otherClient != nil {
@@ -645,7 +750,7 @@ func (s *Server) handleClientDisconnect(c *Client) {
 	}
 
 	if shouldFinish {
-		s.Games.db.SetGameStatus(s.Games.ctx, gameID, "finished")
+		s.Games.db.FinishGameState(s.Games.ctx, gameID, uuid.Nil)
 	}
 	if shouldBroadcastGameOver && winnerID != uuid.Nil {
 		s.broadcastGameOver(gameID, winnerID, "disconnect", "win")

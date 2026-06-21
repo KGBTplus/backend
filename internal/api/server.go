@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	crand "crypto/rand"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,6 +56,7 @@ type otpEntry struct {
 type Server struct {
 	Unimplemented
 	DB             *db.Queries
+	SQLDB          *sql.DB
 	SMTP           SMTPConfig
 	JWTKey         []byte
 	Games          *GameStore
@@ -67,13 +69,14 @@ type Server struct {
 	codeRateLimits map[string]time.Time
 }
 
-func NewServer(db *db.Queries, smtp SMTPConfig, jwtSecret string, opts ...ServerOption) *Server {
+func NewServer(dbq *db.Queries, sqlDB *sql.DB, smtp SMTPConfig, jwtSecret string, opts ...ServerOption) *Server {
 	key := []byte(jwtSecret)
 	s := &Server{
-		DB:             db,
+		DB:             dbq,
+		SQLDB:          sqlDB,
 		SMTP:           smtp,
 		JWTKey:         key,
-		Games:          NewGameStore(db),
+		Games:          NewGameStore(dbq),
 		Hub:            NewHub(),
 		Timers:         NewTimerManager(),
 		codes:          make(map[string]otpEntry),
@@ -233,18 +236,42 @@ func (s *Server) broadcastGameStarted(gameID uuid.UUID) {
 	if game.CurrentTurn != nil {
 		currentTurn = game.CurrentTurn.String()
 	}
+
+	p1Name := ""
+	if p1, err := s.DB.GetUserByID(context.Background(), game.Player1ID); err == nil {
+		p1Name = p1.Username
+	}
+	p2Name := ""
+	if game.Player2ID != nil {
+		if p2, err := s.DB.GetUserByID(context.Background(), *game.Player2ID); err == nil {
+			p2Name = p2.Username
+		}
+	}
+
 	msg := WSMessage{
 		Type: "game_started",
 		Data: mustJSON(GameStartedData{
 			GameID:      gameID.String(),
 			CurrentTurn: currentTurn,
+			Player1ID:   game.Player1ID.String(),
+			Player2ID:   player2IDStr(game.Player2ID),
+			Player1Name: p1Name,
+			Player2Name: p2Name,
 		}),
 	}
+
 	room.mu.RLock()
 	for _, c := range room.Clients {
 		c.SendJSON(msg)
 	}
 	room.mu.RUnlock()
+}
+
+func player2IDStr(id *uuid.UUID) string {
+	if id != nil {
+		return id.String()
+	}
+	return ""
 }
 
 func (s *Server) broadcastOpponentMoved(gameID uuid.UUID, userID uuid.UUID, x, y int, game *GameRoom) {
@@ -367,6 +394,9 @@ func (s *Server) broadcastGameOver(gameID uuid.UUID, winnerID uuid.UUID, winReas
 		})
 	}
 
+	// --- Persist finished_at in game_state ---
+	s.DB.FinishGameState(ctx, gameID, winnerID)
+
 	// --- Economy: calculate coin rewards ---
 	var p1Result string
 	var p2Result string
@@ -384,8 +414,15 @@ func (s *Server) broadcastGameOver(gameID uuid.UUID, winnerID uuid.UUID, winReas
 	perfectWin1 := winnerExists && winnerID == game.Player1ID && p1Sunk == 0
 	perfectWin2 := winnerExists && game.Player2ID != nil && winnerID == *game.Player2ID && p2Sunk == 0
 
-	reward1 := calcGameReward(p1Result, p1Hits, perfectWin1)
-	reward2 := calcGameReward(p2Result, p2Hits, perfectWin2)
+	totalMoves := len(game.Moves)
+	var reward1, reward2 int
+	if winReason == "forfeit" {
+		reward1 = calcForfeitReward(p1Result == "WIN", totalMoves)
+		reward2 = calcForfeitReward(p2Result == "WIN", totalMoves)
+	} else {
+		reward1 = calcGameReward(p1Result, p1Hits, perfectWin1, totalMoves)
+		reward2 = calcGameReward(p2Result, p2Hits, perfectWin2, totalMoves)
+	}
 
 	earnedDelta1 := int32(0)
 	if reward1 > 0 {
@@ -396,9 +433,53 @@ func (s *Server) broadcastGameOver(gameID uuid.UUID, winnerID uuid.UUID, winReas
 		earnedDelta2 = int32(reward2)
 	}
 
-	s.DB.AddGameReward(ctx, game.Player1ID, int32(reward1), earnedDelta1)
+	newCoins1, _ := s.DB.AddGameReward(ctx, game.Player1ID, int32(reward1), earnedDelta1)
+	var newCoins2 int32
 	if game.Player2ID != nil {
-		s.DB.AddGameReward(ctx, *game.Player2ID, int32(reward2), earnedDelta2)
+		newCoins2, _ = s.DB.AddGameReward(ctx, *game.Player2ID, int32(reward2), earnedDelta2)
+	}
+
+	// Track total_spent for losers (coin loss = spending)
+	if reward1 < 0 {
+		s.DB.AddTotalSpent(ctx, game.Player1ID, -int32(reward1))
+	}
+	if game.Player2ID != nil && reward2 < 0 {
+		s.DB.AddTotalSpent(ctx, *game.Player2ID, -int32(reward2))
+	}
+
+	// --- Save match history for both players ---
+	p2Name := ""
+	if game.Player2ID != nil {
+		if u2, err := s.DB.GetUserByID(ctx, *game.Player2ID); err == nil {
+			p2Name = u2.Username
+		}
+	}
+	p1Name := ""
+	if u1, err := s.DB.GetUserByID(ctx, game.Player1ID); err == nil {
+		p1Name = u1.Username
+	}
+	if err := s.DB.InsertMatchHistory(ctx, game.Player1ID, gameID, strings.ToLower(p1Result), int32(reward1), p2Name); err != nil {
+		log.Printf("[MATCH HISTORY] failed to insert for player %s (game %s): %v", game.Player1ID, gameID, err)
+	} else {
+		log.Printf("[MATCH HISTORY] saved: player=%s game=%s result=%s coins=%d", game.Player1ID, gameID, strings.ToLower(p1Result), reward1)
+	}
+	if game.Player2ID != nil {
+		if err := s.DB.InsertMatchHistory(ctx, *game.Player2ID, gameID, strings.ToLower(p2Result), int32(reward2), p1Name); err != nil {
+			log.Printf("[MATCH HISTORY] failed to insert for player %s (game %s): %v", *game.Player2ID, gameID, err)
+		} else {
+			log.Printf("[MATCH HISTORY] saved: player=%s game=%s result=%s coins=%d", *game.Player2ID, gameID, strings.ToLower(p2Result), reward2)
+		}
+	}
+
+	// --- Add time in battle ---
+	if game.BattleStartedAt != nil {
+		battleSeconds := int32(time.Since(*game.BattleStartedAt).Seconds())
+		if battleSeconds > 0 {
+			s.DB.AddTimeInBattle(ctx, game.Player1ID, battleSeconds)
+			if game.Player2ID != nil {
+				s.DB.AddTimeInBattle(ctx, *game.Player2ID, battleSeconds)
+			}
+		}
 	}
 
 	room := s.Hub.GetRoom(gameID)
@@ -431,6 +512,10 @@ func (s *Server) broadcastGameOver(gameID uuid.UUID, winnerID uuid.UUID, winReas
 		Hits2:          p2Hits,
 		PerfectWin1:    perfectWin1,
 		PerfectWin2:    perfectWin2,
+		Player1ID:      game.Player1ID.String(),
+		Player2ID:      player2IDStr(game.Player2ID),
+		NewBalance1:    int(newCoins1),
+		NewBalance2:    int(newCoins2),
 	}
 
 	room.mu.RLock()
@@ -445,7 +530,7 @@ func (s *Server) broadcastGameOver(gameID uuid.UUID, winnerID uuid.UUID, winReas
 	s.startGameOverTimer(gameID)
 }
 
-func calcGameReward(result string, hits int, perfectWin bool) int {
+func calcGameReward(result string, hits int, perfectWin bool, totalMoves int) int {
 	var resultReward int
 	switch result {
 	case "WIN":
@@ -456,13 +541,45 @@ func calcGameReward(result string, hits int, perfectWin bool) int {
 		resultReward = LOSE_REWARD
 	}
 
-	baseResult := resultReward + hits*HIT_REWARD
+	var movesMultiplier float64
+	switch {
+	case totalMoves <= EARLY_MOVE_THRESHOLD:
+		movesMultiplier = EARLY_MULTIPLIER
+	case totalMoves >= LATE_MOVE_THRESHOLD:
+		movesMultiplier = LATE_MULTIPLIER
+	default:
+		movesMultiplier = NORMAL_MULTIPLIER
+	}
+
+	baseResult := int(float64(resultReward+hits*HIT_REWARD) * movesMultiplier)
 	if perfectWin {
 		baseResult += PERFECT_WIN_BONUS
 	}
 
 	randomFactor := RANDOM_FACTOR_MIN + rand.Float64()*(RANDOM_FACTOR_MAX-RANDOM_FACTOR_MIN)
 	finalResult := int(math.Round(float64(baseResult) * (1 + randomFactor)))
+
+	return finalResult
+}
+
+func calcForfeitReward(winner bool, totalMoves int) int {
+	var resultReward int
+	if winner {
+		moveRatio := float64(totalMoves) / float64(FORFEIT_MAX_MOVES)
+		if moveRatio > 1.0 {
+			moveRatio = 1.0
+		}
+		resultReward = FORFEIT_WIN_MIN + int(moveRatio*float64(FORFEIT_WIN_MAX-FORFEIT_WIN_MIN))
+	} else {
+		moveRatio := float64(totalMoves) / float64(FORFEIT_MAX_MOVES)
+		if moveRatio > 1.0 {
+			moveRatio = 1.0
+		}
+		resultReward = FORFEIT_LOSE_MIN + int(moveRatio*float64(FORFEIT_LOSE_MAX-FORFEIT_LOSE_MIN))
+	}
+
+	randomFactor := RANDOM_FACTOR_MIN + rand.Float64()*(RANDOM_FACTOR_MAX-RANDOM_FACTOR_MIN)
+	finalResult := int(math.Round(float64(resultReward) * (1 + randomFactor)))
 
 	return finalResult
 }

@@ -28,14 +28,16 @@ func (s *Server) GetLeaderboard(w http.ResponseWriter, r *http.Request, params G
 	var top []map[string]interface{}
 	for _, r := range rows {
 		top = append(top, map[string]interface{}{
-			"rank":        r.Rank,
-			"player_id":   r.PlayerID,
-			"username":    r.Username,
-			"wins":        r.Wins,
-			"losses":      r.Losses,
-			"total_games": r.TotalGames,
-			"win_rate":    r.WinRate,
-			"hit_rate":    r.HitRate,
+			"rank":          r.Rank,
+			"player_id":     r.PlayerID,
+			"username":      r.Username,
+			"wins":          r.Wins,
+			"losses":        r.Losses,
+			"total_games":   r.TotalGames,
+			"total_earned":  r.TotalEarned,
+			"total_spent":   r.TotalSpent,
+			"win_rate":      r.WinRate,
+			"hit_rate":      r.HitRate,
 		})
 	}
 
@@ -51,13 +53,15 @@ func (s *Server) GetLeaderboard(w http.ResponseWriter, r *http.Request, params G
 			hitRate = float64(myRankRow.Hits) / float64(myRankRow.TotalShots) * 100
 		}
 		myRank = map[string]interface{}{
-			"player_id":   myRankRow.ID,
-			"username":    myRankRow.Username,
-			"wins":        myRankRow.Wins,
-			"losses":      myRankRow.Losses,
-			"total_games": myRankRow.TotalGames,
-			"win_rate":    winRate,
-			"hit_rate":    hitRate,
+			"player_id":     myRankRow.ID,
+			"username":      myRankRow.Username,
+			"wins":          myRankRow.Wins,
+			"losses":        myRankRow.Losses,
+			"total_games":   myRankRow.TotalGames,
+			"total_earned":  myRankRow.TotalEarned,
+			"total_spent":   myRankRow.TotalSpent,
+			"win_rate":      winRate,
+			"hit_rate":      hitRate,
 		}
 	}
 

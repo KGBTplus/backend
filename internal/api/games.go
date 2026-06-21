@@ -6,7 +6,9 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"time"
 
+	"github.com/KGBTplus/backend/internal/db"
 	"github.com/google/uuid"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
@@ -67,18 +69,37 @@ func (s *Server) GetGameHistory(w http.ResponseWriter, r *http.Request, params G
 		return
 	}
 
-	var finished []*GameRoom
-	for _, g := range s.Games.All() {
-		if (g.Player1ID == userID || (g.Player2ID != nil && *g.Player2ID == userID)) &&
-			g.Status == "finished" {
-			finished = append(finished, g)
-		}
+	page := 1
+	limit := 20
+	if params.Page != nil {
+		page = *params.Page
 	}
-	if finished == nil {
-		finished = []*GameRoom{}
+	if params.Limit != nil {
+		limit = *params.Limit
 	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := int32((page - 1) * limit)
+
+	matches, err := s.DB.GetMatchHistory(r.Context(), userID, int32(limit), offset)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка загрузки истории")
+		return
+	}
+	total, _ := s.DB.CountMatchHistory(r.Context(), userID)
+
+	if matches == nil {
+		matches = []db.MatchHistoryRow{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(finished)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"matches": matches,
+		"total":   total,
+		"page":    page,
+		"limit":   limit,
+	})
 }
 
 func (s *Server) GetGameState(w http.ResponseWriter, r *http.Request, gameID openapi_types.UUID) {
@@ -187,6 +208,16 @@ func (s *Server) MakeMove(w http.ResponseWriter, r *http.Request, gameID openapi
 	json.NewEncoder(w).Encode(game)
 }
 
+func filterShipsByPlayer(ships []Ship, playerID uuid.UUID) []Ship {
+	var result []Ship
+	for _, s := range ships {
+		if s.PlayerID == playerID {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
 func (s *Server) broadcastGameState(gameID uuid.UUID) {
 	room := s.Hub.GetRoom(gameID)
 	if room == nil {
@@ -199,17 +230,8 @@ func (s *Server) broadcastGameState(gameID uuid.UUID) {
 	room.mu.RLock()
 	for _, c := range room.Clients {
 		resp := s.gameToMap(context.Background(), game)
-		var playerShips []Ship
-		var sunkEnemy []Ship
-		for _, ship := range game.Ships {
-			if ship.PlayerID == c.UserID {
-				playerShips = append(playerShips, ship)
-			} else if ship.Sunk {
-				sunkEnemy = append(sunkEnemy, ship)
-			}
-		}
-		resp["ships"] = playerShips
-		resp["sunk_enemy_ships"] = sunkEnemy
+		resp["ships"] = filterShipsByPlayer(game.Ships, c.UserID)
+		resp["my_user_id"] = c.UserID.String()
 		c.SendJSON(resp)
 	}
 	room.mu.RUnlock()
@@ -452,9 +474,21 @@ func (s *Server) ConfirmShips(w http.ResponseWriter, r *http.Request, gameID ope
 		return
 	}
 
+	// Mark player as ready
+	if userID == game.Player1ID {
+		game.IsPlacingReady1 = true
+	} else if game.Player2ID != nil && userID == *game.Player2ID {
+		game.IsPlacingReady2 = true
+	}
+
 	beforeStatus := game.Status
 	s.Games.CheckAndStart(uuid.UUID(gameID))
 	gameAfter, _ := s.Games.Get(uuid.UUID(gameID))
+
+	if beforeStatus != "playing" && gameAfter.Status == "playing" {
+		now := time.Now()
+		gameAfter.BattleStartedAt = &now
+	}
 
 	s.broadcastOpponentReady(uuid.UUID(gameID), userID)
 	if beforeStatus != "playing" && gameAfter.Status == "playing" {
@@ -595,6 +629,13 @@ func (s *Server) ResetShips(w http.ResponseWriter, r *http.Request, gameID opena
 	}
 	game.Ships = kept
 
+	// Reset ready flag
+	if userID == game.Player1ID {
+		game.IsPlacingReady1 = false
+	} else if game.Player2ID != nil && userID == *game.Player2ID {
+		game.IsPlacingReady2 = false
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(game)
 }
@@ -607,7 +648,6 @@ func (s *Server) gameToMap(ctx context.Context, g *GameRoom) map[string]interfac
 		"status":       g.Status,
 		"current_turn": g.CurrentTurn,
 		"winner_id":    g.WinnerID,
-		"ships":        g.Ships,
 		"moves":        g.Moves,
 		"created_at":   g.CreatedAt,
 	}

@@ -13,6 +13,18 @@ const (
 	PERFECT_WIN_BONUS = 20
 	RANDOM_FACTOR_MIN = -0.05
 	RANDOM_FACTOR_MAX = 0.05
+
+	EARLY_MOVE_THRESHOLD = 10
+	LATE_MOVE_THRESHOLD  = 25
+	EARLY_MULTIPLIER     = 0.5
+	NORMAL_MULTIPLIER    = 1.0
+	LATE_MULTIPLIER      = 1.5
+
+	FORFEIT_WIN_MIN   = 5
+	FORFEIT_WIN_MAX   = 25
+	FORFEIT_LOSE_MIN  = 0
+	FORFEIT_LOSE_MAX  = -5
+	FORFEIT_MAX_MOVES = 30
 )
 
 func (s *Server) GetProfileShop(w http.ResponseWriter, r *http.Request) {
@@ -91,14 +103,8 @@ func (s *Server) BuyFish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = s.DB.BuyFishAtomic(r.Context(), userID, int32(fish.Price))
-	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Ошибка списания монет")
-		return
-	}
-
-	if err := s.DB.AddToInventory(r.Context(), userID, req.FishID); err != nil {
-		sendError(w, http.StatusInternalServerError, "Ошибка добавления в инвентарь")
+	if err := s.DB.BuyFishAtomicTx(r.Context(), s.SQLDB, userID, req.FishID, int32(fish.Price)); err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка покупки")
 		return
 	}
 

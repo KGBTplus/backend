@@ -48,13 +48,11 @@ services:
       context: ../Sea-Battle-Frontend-GUI
       dockerfile: Dockerfile
       args:
-        VITE_API_URL: http://localhost:8080
+        VITE_API_URL: /api
     container_name: game_frontend
     restart: always
     ports:
       - "5173:80"
-    environment:
-      VITE_API_URL: http://localhost:8080
     depends_on:
       - backend
     networks:

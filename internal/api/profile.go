@@ -58,6 +58,7 @@ func (s *Server) GetProfile(w http.ResponseWriter, r *http.Request) {
 		"active_fish":      profile.ActiveFish,
 		"total_spent":      profile.TotalSpent,
 		"total_earned":     profile.TotalEarned,
+		"time_in_battle":   profile.TimeInBattle,
 	})
 }
 

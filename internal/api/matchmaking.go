@@ -15,6 +15,11 @@ func (s *Server) JoinMatchmaking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if active := s.Games.FindActiveGame(userID); active != nil {
+		sendError(w, http.StatusConflict, "Вы уже в активной игре")
+		return
+	}
+
 	if DebugMode {
 		log.Printf("[MM] user=%s joining matchmaking queue", userID)
 	}

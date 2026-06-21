@@ -42,6 +42,7 @@ type Profile struct {
 	ActiveFish  []string
 	TotalSpent  int32
 	TotalEarned int32
+	TimeInBattle int32
 }
 
 type User struct {

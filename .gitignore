@@ -2,3 +2,5 @@
 *.exe
 server
 deploy/secret.yaml
+*.log
+/tmp/

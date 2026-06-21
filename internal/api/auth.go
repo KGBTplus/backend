@@ -587,10 +587,18 @@ func (s *Server) WsToken(w http.ResponseWriter, r *http.Request) {
 		sendError(w, http.StatusUnauthorized, "Не авторизован")
 		return
 	}
-	// WS-токен: без token_version и type — только sub + короткий exp
+
+	user, err := s.DB.GetUserWithTokenVersion(r.Context(), userID)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка получения данных пользователя")
+		return
+	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": userID.String(),
-		"exp": time.Now().Add(otpExpiry).Unix(),
+		"sub":           userID.String(),
+		"exp":           time.Now().Add(otpExpiry).Unix(),
+		"type":          "ws",
+		"token_version": user.TokenVersion,
 	})
 	tokenString, _ := token.SignedString(s.JWTKey)
 	w.Header().Set("Content-Type", "application/json")

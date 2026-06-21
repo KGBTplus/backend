@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // ---------- 2FA отключение ----------
@@ -11,6 +13,28 @@ func (s *Server) Disable2FA(w http.ResponseWriter, r *http.Request) {
 	userID, err := s.getUserIDFromToken(r)
 	if err != nil {
 		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, http.StatusBadRequest, "Неверный формат JSON")
+		return
+	}
+	if req.Password == "" {
+		sendError(w, http.StatusBadRequest, "Требуется текущий пароль для отключения 2FA")
+		return
+	}
+
+	user, err := s.DB.GetUserByID(r.Context(), userID)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка получения пользователя")
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		sendError(w, http.StatusUnauthorized, "Неверный пароль")
 		return
 	}
 

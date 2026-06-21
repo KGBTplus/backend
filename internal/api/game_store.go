@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -46,10 +47,15 @@ type GameRoom struct {
 	Ships       []Ship     `json:"ships"`
 	Moves       []Move     `json:"moves"`
 	CreatedAt   time.Time  `json:"created_at"`
+	BattleStartedAt *time.Time `json:"-"`
 	FinalRoundTrigger *uuid.UUID `json:"-"`
 
-	IsRevanchReady1 bool `json:"-"`
-	IsRevanchReady2 bool `json:"-"`
+	IsRevanchReady1  bool `json:"-"`
+	IsRevanchReady2  bool `json:"-"`
+	RematchInProgress bool `json:"-"`
+
+	IsPlacingReady1 bool `json:"-"`
+	IsPlacingReady2 bool `json:"-"`
 
 	isGameOverBroadcasted bool
 }
@@ -213,6 +219,63 @@ func (gs *GameStore) DeletePlayerShips(gameID, playerID uuid.UUID) {
 	gs.db.DeletePlayerShips(gs.ctx, gameID, playerID)
 }
 
+func validateShipPlacement(ships []Ship) bool {
+	boardSize := 10
+	occupied := make([][]bool, boardSize)
+	for i := range occupied {
+		occupied[i] = make([]bool, boardSize)
+	}
+	for _, s := range ships {
+		if s.ShipType < 1 || s.ShipType > 4 {
+			return false
+		}
+		if s.StartX < 0 || s.StartX >= boardSize || s.StartY < 0 || s.StartY >= boardSize {
+			return false
+		}
+		var cells [][2]int
+		for j := 0; j < s.ShipType; j++ {
+			cx := s.StartX
+			cy := s.StartY
+			if s.Horizontal {
+				cx += j
+			} else {
+				cy += j
+			}
+			if cx < 0 || cx >= boardSize || cy < 0 || cy >= boardSize {
+				return false
+			}
+			cells = append(cells, [2]int{cx, cy})
+		}
+		for _, cell := range cells {
+			for dy := -1; dy <= 1; dy++ {
+				for dx := -1; dx <= 1; dx++ {
+					nx, ny := cell[0]+dx, cell[1]+dy
+					if nx >= 0 && nx < boardSize && ny >= 0 && ny < boardSize {
+						if occupied[ny][nx] {
+							return false
+						}
+					}
+				}
+			}
+		}
+		for _, cell := range cells {
+			occupied[cell[1]][cell[0]] = true
+		}
+	}
+
+	typeCount := map[int]int{4: 1, 3: 2, 2: 3, 1: 4}
+	for _, s := range ships {
+		typeCount[s.ShipType]--
+	}
+	for _, c := range typeCount {
+		if c != 0 {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (gs *GameStore) PlaceShips(gameID, playerID uuid.UUID, ships []Ship) bool {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
@@ -224,6 +287,10 @@ func (gs *GameStore) PlaceShips(gameID, playerID uuid.UUID, ships []Ship) bool {
 		return false
 	}
 	if g.Player1ID != playerID && (g.Player2ID == nil || *g.Player2ID != playerID) {
+		return false
+	}
+
+	if !validateShipPlacement(ships) {
 		return false
 	}
 
@@ -286,13 +353,17 @@ func (gs *GameStore) CheckAndStart(gameID uuid.UUID) {
 			p2Ships++
 		}
 	}
-	if p1Ships >= 10 && p2Ships >= 10 {
+	if p1Ships >= 10 && p2Ships >= 10 && g.IsPlacingReady1 && g.IsPlacingReady2 {
 		g.Status = "playing"
-		g.CurrentTurn = &g.Player1ID
+		if rand.Intn(2) == 0 {
+			g.CurrentTurn = &g.Player1ID
+		} else {
+			g.CurrentTurn = g.Player2ID
+		}
 	}
 	gs.mu.Unlock()
 
-	if p1Ships >= 10 && p2Ships >= 10 {
+	if p1Ships >= 10 && p2Ships >= 10 && g.Status == "playing" {
 		gs.db.SetGameStatus(gs.ctx, gameID, "playing")
 		gs.db.SetGameCurrentTurn(gs.ctx, gameID, g.CurrentTurn)
 	}

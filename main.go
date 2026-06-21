@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"sync"
 	"time"
 
@@ -89,6 +90,10 @@ func main() {
 
 	queries := db.New(dbConn)
 
+	dbConn.SetMaxOpenConns(25)
+	dbConn.SetMaxIdleConns(10)
+	dbConn.SetConnMaxLifetime(5 * time.Minute)
+
 	// Подождём, пока БД станет доступна (на случай задержки DNS/стартов контейнеров)
 	maxAttempts := 30
 	for i := 0; i < maxAttempts; i++ {
@@ -115,10 +120,12 @@ func main() {
 		log.Fatal("JWT_SECRET должен быть не менее 32 символов. Задайте переменную окружения JWT_SECRET.")
 	}
 	secureCookies := os.Getenv("ENV") == "production" || os.Getenv("SECURE_COOKIES") == "true"
-	srv := api.NewServer(queries, smtpCfg, jwtSecret, api.WithSecureCookies(secureCookies))
+	srv := api.NewServer(queries, dbConn, smtpCfg, jwtSecret, api.WithSecureCookies(secureCookies))
 
 	// Rate limiter: 10 запросов в секунду на IP для auth
 	authLimiter := newRateLimiter(10, time.Second)
+	// Rate limiter: 3 выстрела в секунду на игрока
+	moveLimiter := newRateLimiter(3, time.Second)
 
 	// 4. Настройка роутера
 	r := chi.NewRouter()
@@ -160,6 +167,25 @@ func main() {
 				if !ok {
 					http.Error(w, "Forbidden", http.StatusForbidden)
 					return
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
+
+	// Rate limiter middleware for game move/forfeit endpoints
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "POST" {
+				if matched, _ := regexp.MatchString(`^/games/[^/]+/(move|forfeit)$`, r.URL.Path); matched {
+					ip := r.RemoteAddr
+					if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+						ip = forwarded
+					}
+					if !moveLimiter.Allow("move:" + ip) {
+						http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+						return
+					}
 				}
 			}
 			next.ServeHTTP(w, r)
@@ -218,10 +244,17 @@ func main() {
 		return nil
 	})
 
-	// 6. Запуск
+	// 6. Настройка HTTP-сервера с таймаутами
 	port := ":8080"
+	httpSrv := &http.Server{
+		Handler:      r,
+		Addr:         port,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
 	log.Printf("Сервер запущен на http://localhost%s", port)
-	if err := http.ListenAndServe(port, r); err != nil {
+	if err := httpSrv.ListenAndServe(); err != nil {
 		log.Fatalf("Сервер упал: %v", err)
 	}
 }

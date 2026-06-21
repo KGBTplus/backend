@@ -18,23 +18,19 @@ func (s *Server) CreateGameSession(creatorID, joinerID uuid.UUID) *GameRoom {
 
 	log.Printf("[SESSION] game created: %s, p1=%s p2=%s", game.ID, creatorID, joinerID)
 
+	// Add already-connected clients to the room; others will be added
+	// when their WS connects via the readPump reconnection logic.
 	room := s.Hub.GetOrCreateRoom(game.ID)
-	if client, ok := s.Hub.GetClient(creatorID); ok {
-		room.AddClient(client)
-	}
-	if client, ok := s.Hub.GetClient(joinerID); ok {
-		room.AddClient(client)
-	}
-
 	gameIDStr := game.ID.String()
-	s.Hub.SendToClient(creatorID, WSMessage{
-		Type: "match_found",
-		Data: mustJSON(MatchFoundData{GameID: gameIDStr}),
-	})
-	s.Hub.SendToClient(joinerID, WSMessage{
-		Type: "match_found",
-		Data: mustJSON(MatchFoundData{GameID: gameIDStr}),
-	})
+	for _, uid := range []uuid.UUID{creatorID, joinerID} {
+		if client, ok := s.Hub.GetClient(uid); ok {
+			room.AddClient(client)
+			client.SendJSON(WSMessage{
+				Type: "match_found",
+				Data: mustJSON(MatchFoundData{GameID: gameIDStr}),
+			})
+		}
+	}
 
 	s.DB.DeleteUserLobbies(context.Background(), creatorID)
 	s.DB.DeleteUserLobbies(context.Background(), joinerID)
