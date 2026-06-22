@@ -216,13 +216,17 @@ func main() {
 		r.Post("/auth/refresh", srv.RefreshToken)
 		r.Get("/auth/ws-token", srv.WsToken)
 		r.Post("/auth/logout", srv.Logout)
+		r.Get("/achievements", srv.GetAchievementsList)
+		r.Post("/achievements/claim", srv.ClaimAchievement)
+
 	})
 
 	r.Get("/ws", srv.HandleWebSocket)
 
 	r.Get("/shop", srv.GetShop)
 	r.Post("/buy_fish", srv.BuyFish)
-	r.Post("/equip_fish", srv.EquipFish)
+	r.Get("/inventory", srv.GetInventory)
+	r.Post("/inventory/toggle", srv.ToggleFish)
 	r.Get("/swagger/doc.json", func(w http.ResponseWriter, r *http.Request) {
 		spec, err := api.GetSpecJSON()
 		if err != nil {

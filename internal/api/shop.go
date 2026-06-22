@@ -55,8 +55,101 @@ func (s *Server) GetShop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	catalog, err := LoadFishCatalog(r.Context(), s.SQLDB)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка загрузки каталога")
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(FishCatalog)
+	json.NewEncoder(w).Encode(catalog)
+}
+
+func (s *Server) GetInventory(w http.ResponseWriter, r *http.Request) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	inventory, err := s.DB.GetInventory(r.Context(), userID)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка загрузки инвентаря")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"inventory": inventory,
+	})
+}
+
+func (s *Server) ToggleFish(w http.ResponseWriter, r *http.Request) {
+	userID, err := s.getUserIDFromToken(r)
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Не авторизован")
+		return
+	}
+
+	var req struct {
+		FishID string `json:"fishId"`
+		Active bool   `json:"active"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, http.StatusBadRequest, "Неверный формат JSON")
+		return
+	}
+
+	if req.FishID == "" {
+		sendError(w, http.StatusBadRequest, "fishId обязателен")
+		return
+	}
+
+	fish, err := GetFishByID(r.Context(), s.SQLDB, req.FishID)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка проверки рыбки")
+		return
+	}
+	if fish == nil {
+		sendError(w, http.StatusNotFound, "Рыбка не найдена")
+		return
+	}
+
+	profile, err := s.DB.GetProfileShop(r.Context(), userID)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка получения профиля")
+		return
+	}
+
+	owned := false
+	for _, f := range profile.Inventory {
+		if f == req.FishID {
+			owned = true
+			break
+		}
+	}
+	if !owned {
+		sendError(w, http.StatusBadRequest, "Рыбка не куплена")
+		return
+	}
+
+	if err := s.DB.ToggleActiveFish(r.Context(), userID, req.FishID, req.Active); err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка переключения")
+		return
+	}
+
+	updatedProfile, err := s.DB.GetProfileShop(r.Context(), userID)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка получения профиля")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"coins":       updatedProfile.Coins,
+		"inventory":   updatedProfile.Inventory,
+		"active_fish": updatedProfile.ActiveFish,
+	})
 }
 
 func (s *Server) BuyFish(w http.ResponseWriter, r *http.Request) {
@@ -79,7 +172,11 @@ func (s *Server) BuyFish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fish := FishByID(req.FishID)
+	fish, err := GetFishByID(r.Context(), s.SQLDB, req.FishID)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Ошибка проверки рыбки")
+		return
+	}
 	if fish == nil {
 		sendError(w, http.StatusNotFound, "Рыбка не найдена")
 		return
@@ -121,62 +218,3 @@ func (s *Server) BuyFish(w http.ResponseWriter, r *http.Request) {
 		"active_fish": updatedProfile.ActiveFish,
 	})
 }
-
-func (s *Server) EquipFish(w http.ResponseWriter, r *http.Request) {
-	userID, err := s.getUserIDFromToken(r)
-	if err != nil {
-		sendError(w, http.StatusUnauthorized, "Не авторизован")
-		return
-	}
-
-	var req struct {
-		FishIDs []string `json:"fishIds"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		sendError(w, http.StatusBadRequest, "Неверный формат JSON")
-		return
-	}
-
-	if len(req.FishIDs) == 0 {
-		sendError(w, http.StatusBadRequest, "Выберите хотя бы одну рыбку")
-		return
-	}
-
-	profile, err := s.DB.GetProfileShop(r.Context(), userID)
-	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Ошибка получения профиля")
-		return
-	}
-
-	invSet := make(map[string]bool, len(profile.Inventory))
-	for _, f := range profile.Inventory {
-		invSet[f] = true
-	}
-
-	for _, fishID := range req.FishIDs {
-		if !invSet[fishID] {
-			sendError(w, http.StatusBadRequest, "Рыбка "+fishID+" не найдена в инвентаре")
-			return
-		}
-	}
-
-	if err := s.DB.SetActiveFish(r.Context(), userID, req.FishIDs); err != nil {
-		sendError(w, http.StatusInternalServerError, "Ошибка сохранения")
-		return
-	}
-
-	updatedProfile, err := s.DB.GetProfileShop(r.Context(), userID)
-	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Ошибка получения профиля")
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"coins":       updatedProfile.Coins,
-		"inventory":   updatedProfile.Inventory,
-		"active_fish": updatedProfile.ActiveFish,
-	})
-}
-
-

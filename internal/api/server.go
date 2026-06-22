@@ -62,11 +62,21 @@ type Server struct {
 	Games          *GameStore
 	Hub            *Hub
 	Timers         *TimerManager
+	Lobbies        *MemoryLobbyStore
 	SecureCookies  bool
 	codesMu        sync.Mutex
 	codes          map[string]otpEntry
 	rateMu         sync.Mutex
 	codeRateLimits map[string]time.Time
+}
+
+func (s *Server) cleanupLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		s.Games.CleanupStale()
+		s.Lobbies.Cleanup()
+	}
 }
 
 func NewServer(dbq *db.Queries, sqlDB *sql.DB, smtp SMTPConfig, jwtSecret string, opts ...ServerOption) *Server {
@@ -79,9 +89,11 @@ func NewServer(dbq *db.Queries, sqlDB *sql.DB, smtp SMTPConfig, jwtSecret string
 		Games:          NewGameStore(dbq),
 		Hub:            NewHub(),
 		Timers:         NewTimerManager(),
+		Lobbies:        NewMemoryLobbyStore(),
 		codes:          make(map[string]otpEntry),
 		codeRateLimits: make(map[string]time.Time),
 	}
+	go s.cleanupLoop()
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -478,6 +490,26 @@ func (s *Server) broadcastGameOver(gameID uuid.UUID, winnerID uuid.UUID, winReas
 			s.DB.AddTimeInBattle(ctx, game.Player1ID, battleSeconds)
 			if game.Player2ID != nil {
 				s.DB.AddTimeInBattle(ctx, *game.Player2ID, battleSeconds)
+			}
+		}
+	}
+
+	// --- Check achievements for both players ---
+	for _, playerID := range []uuid.UUID{game.Player1ID} {
+		profile, err := s.DB.GetProfileShop(ctx, playerID)
+		if err == nil {
+			newlyUnlocked := s.CheckAchievements(ctx, playerID, profile)
+			for _, ach := range newlyUnlocked {
+				s.sendAchievementUnlocked(playerID, ach)
+			}
+		}
+	}
+	if game.Player2ID != nil {
+		profile, err := s.DB.GetProfileShop(ctx, *game.Player2ID)
+		if err == nil {
+			newlyUnlocked := s.CheckAchievements(ctx, *game.Player2ID, profile)
+			for _, ach := range newlyUnlocked {
+				s.sendAchievementUnlocked(*game.Player2ID, ach)
 			}
 		}
 	}

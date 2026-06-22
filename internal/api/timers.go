@@ -23,6 +23,7 @@ type TimerManager struct {
 	placement map[uuid.UUID]context.CancelFunc
 	turns     map[uuid.UUID]context.CancelFunc
 	gameOver  map[uuid.UUID]context.CancelFunc
+	reconnect map[uuid.UUID]context.CancelFunc
 }
 
 func NewTimerManager() *TimerManager {
@@ -30,6 +31,7 @@ func NewTimerManager() *TimerManager {
 		placement: make(map[uuid.UUID]context.CancelFunc),
 		turns:     make(map[uuid.UUID]context.CancelFunc),
 		gameOver:  make(map[uuid.UUID]context.CancelFunc),
+		reconnect: make(map[uuid.UUID]context.CancelFunc),
 	}
 }
 
@@ -60,10 +62,20 @@ func (tm *TimerManager) StopGameOver(gameID uuid.UUID) {
 	}
 }
 
+func (tm *TimerManager) StopReconnect(gameID uuid.UUID) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	if cancel, ok := tm.reconnect[gameID]; ok {
+		cancel()
+		delete(tm.reconnect, gameID)
+	}
+}
+
 func (tm *TimerManager) StopAll(gameID uuid.UUID) {
 	tm.StopPlacement(gameID)
 	tm.StopTurn(gameID)
 	tm.StopGameOver(gameID)
+	tm.StopReconnect(gameID)
 }
 
 func (s *Server) startPlacementTimer(gameID uuid.UUID) {
@@ -617,6 +629,11 @@ func (s *Server) startRematch(oldGameID uuid.UUID) {
 func (s *Server) handleLeaveLobby(c *Client) {
 	s.DB.LeaveMatchmaking(context.Background(), c.UserID)
 
+	if lobby, ok := s.Lobbies.IsPlayerInLobby(c.UserID); ok {
+		s.Lobbies.Leave(lobby.ID, c.UserID)
+		s.broadcastLobbyList()
+	}
+
 	if c.Room == nil {
 		c.SendJSON(WSMessage{Type: "left_lobby"})
 		return
@@ -636,7 +653,6 @@ func (s *Server) handleLeaveLobby(c *Client) {
 	otherClient := c.Room.GetOtherClient(c.UserID)
 
 	if ok && (gameStatus == "placing_ships" || gameStatus == "waiting") && !isCreator {
-		// Non-creator leaves during placement/waiting — creator stays in the room
 		if otherClient != nil {
 			otherClient.SendJSON(WSMessage{
 				Type: "opponent_left",
@@ -683,14 +699,87 @@ func (s *Server) handleLeaveLobby(c *Client) {
 	c.SendJSON(WSMessage{Type: "left_lobby"})
 }
 
+func (s *Server) startReconnectTimer(gameID uuid.UUID, disconnectedPlayer uuid.UUID) {
+	s.Timers.StopReconnect(gameID)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.Timers.mu.Lock()
+	s.Timers.reconnect[gameID] = cancel
+	s.Timers.mu.Unlock()
+
+	go func() {
+		secondsLeft := 20
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				secondsLeft--
+				if secondsLeft <= 0 {
+					s.handleReconnectTimeout(gameID, disconnectedPlayer)
+					return
+				}
+				room := s.Hub.GetRoom(gameID)
+				if room != nil {
+					room.mu.RLock()
+					for _, client := range room.Clients {
+						if client.UserID != disconnectedPlayer {
+							client.SendJSON(WSMessage{
+								Type: "reconnect_timer",
+								Data: mustJSON(map[string]interface{}{
+									"seconds_left": secondsLeft,
+									"message":      "Ожидание переподключения соперника...",
+								}),
+							})
+						}
+					}
+					room.mu.RUnlock()
+				}
+			}
+		}
+	}()
+}
+
+func (s *Server) handleReconnectTimeout(gameID uuid.UUID, disconnectedPlayer uuid.UUID) {
+	s.Games.Lock()
+	game, ok := s.Games.GetLocked(gameID)
+	if !ok {
+		s.Games.Unlock()
+		return
+	}
+	if game.Status != "waiting_reconnect" {
+		s.Games.Unlock()
+		return
+	}
+
+	var winnerID uuid.UUID
+	if game.Player1ID == disconnectedPlayer && game.Player2ID != nil {
+		winnerID = *game.Player2ID
+	} else if game.Player1ID != disconnectedPlayer {
+		winnerID = game.Player1ID
+	}
+
+	game.Status = "finished"
+	if winnerID != uuid.Nil {
+		game.WinnerID = &winnerID
+	}
+	s.Games.Unlock()
+
+	s.Timers.StopAll(gameID)
+	s.broadcastGameOver(gameID, winnerID, "disconnect", "win")
+}
+
 func (s *Server) handleClientDisconnect(c *Client) {
 	ctx := context.Background()
 	s.DB.LeaveMatchmaking(ctx, c.UserID)
 
-	// Delete any lobbies owned by this player (cascade removes their lobby_players entries)
-	s.SQLDB.ExecContext(ctx, `DELETE FROM lobbies WHERE creator_id = $1`, c.UserID)
-	// Remove player from all remaining lobby_players entries (non-creator participation)
-	s.SQLDB.ExecContext(ctx, `DELETE FROM lobby_players WHERE player_id = $1`, c.UserID)
+	if lobby, ok := s.Lobbies.IsPlayerInLobby(c.UserID); ok {
+		s.Lobbies.Leave(lobby.ID, c.UserID)
+		s.broadcastLobbyList()
+	}
 
 	if c.Room == nil {
 		return
@@ -723,10 +812,16 @@ func (s *Server) handleClientDisconnect(c *Client) {
 			game.WinnerID = &winnerID
 			shouldBroadcastGameOver = true
 		}
-	case "placing_ships", "waiting":
-		// Don't finish the game — just detach the client.
-		// The placement timer will handle timeouts and auto-generate ships.
-		// The other player can reconnect.
+	case "placing_ships":
+		game.Status = "waiting_reconnect"
+		shouldFinish = false
+	case "waiting":
+		shouldFinish = false
+	case "waiting_reconnect":
+		// Both disconnected — finish the game as draw
+		game.Status = "finished"
+		game.WinnerID = nil
+		shouldFinish = true
 	default:
 		game.Status = "finished"
 		shouldFinish = true
@@ -735,18 +830,21 @@ func (s *Server) handleClientDisconnect(c *Client) {
 
 	if shouldFinish || shouldBroadcastGameOver {
 		s.Timers.StopAll(gameID)
-	} else if gameStatus != "placing_ships" && gameStatus != "waiting" {
+	} else if gameStatus == "placing_ships" {
 		s.Timers.StopPlacement(gameID)
+		s.startReconnectTimer(gameID, c.UserID)
 	}
 
-	otherClient := c.Room.GetOtherClient(c.UserID)
-	if otherClient != nil {
-		otherClient.SendJSON(WSMessage{
-			Type: "opponent_left",
-			Data: mustJSON(map[string]string{
-				"message": "Соперник потерял соединение",
-			}),
-		})
+	if c.Room != nil {
+		otherClient := c.Room.GetOtherClient(c.UserID)
+		if otherClient != nil {
+			otherClient.SendJSON(WSMessage{
+				Type: "opponent_left",
+				Data: mustJSON(map[string]string{
+					"message": "Соперник потерял соединение. Ожидание переподключения...",
+				}),
+			})
+		}
 	}
 
 	if shouldFinish {

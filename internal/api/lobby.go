@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/KGBTplus/backend/internal/db"
 	"github.com/google/uuid"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
-func (s *Server) lobbyToMap(ctx context.Context, l db.Lobby, players []uuid.UUID) map[string]interface{} {
-	usernames := make([]string, 0, len(players))
-	for _, pid := range players {
+func (s *Server) lobbyToMap(ctx context.Context, l *MemoryLobby) map[string]interface{} {
+	usernames := make([]string, 0, len(l.Players))
+	for _, pid := range l.Players {
 		u, err := s.DB.GetUserByID(ctx, pid)
 		if err == nil {
 			usernames = append(usernames, u.Username)
@@ -21,8 +20,8 @@ func (s *Server) lobbyToMap(ctx context.Context, l db.Lobby, players []uuid.UUID
 		}
 	}
 	m := map[string]interface{}{
-		"id":          l.ID,
-		"creator_id":  l.CreatorID,
+		"id":           l.ID,
+		"creator_id":   l.CreatorID,
 		"creator_name": func() string {
 			cu, err := s.DB.GetUserByID(ctx, l.CreatorID)
 			if err != nil {
@@ -31,7 +30,7 @@ func (s *Server) lobbyToMap(ctx context.Context, l db.Lobby, players []uuid.UUID
 			return cu.Username
 		}(),
 		"status":      l.Status,
-		"players":     players,
+		"players":     l.Players,
 		"usernames":   usernames,
 		"max_players": l.MaxPlayers,
 	}
@@ -50,23 +49,10 @@ func (s *Server) ListLobbies(w http.ResponseWriter, r *http.Request, params List
 		status = string(*params.Status)
 	}
 
-	rows, err := s.DB.ListLobbies(r.Context(), db.ListLobbiesParams{
-		Limit:  100,
-		Offset: 0,
-		Status: status,
-	})
-	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Ошибка получения лобби")
-		return
-	}
-
+	rows := s.Lobbies.List(status)
 	var result []map[string]interface{}
 	for _, l := range rows {
-		players, _ := s.DB.GetLobbyPlayers(r.Context(), l.ID)
-		if players == nil {
-			players = []uuid.UUID{}
-		}
-		result = append(result, s.lobbyToMap(r.Context(), l, players))
+		result = append(result, s.lobbyToMap(r.Context(), l))
 	}
 	if result == nil {
 		result = []map[string]interface{}{}
@@ -83,30 +69,12 @@ func (s *Server) CreateLobby(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Always create a new lobby (don't auto-join stale lobbies)
-	l, err := s.DB.CreateLobby(r.Context(), db.CreateLobbyParams{
-		ID:         uuid.New(),
-		CreatorID:  userID,
-		InviteCode: genInviteCode(),
-		MaxPlayers: 2,
-	})
-	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Ошибка создания лобби")
-		return
-	}
-
-	if err := s.DB.AddLobbyPlayer(r.Context(), db.AddLobbyPlayerParams{
-		LobbyID:  l.ID,
-		PlayerID: userID,
-	}); err != nil {
-		s.DB.DeleteLobby(r.Context(), l.ID)
-		sendError(w, http.StatusInternalServerError, "Ошибка создания лобби")
-		return
-	}
+	l := s.Lobbies.Create(userID)
+	s.broadcastLobbyList()
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(s.lobbyToMap(r.Context(), l, []uuid.UUID{userID}))
+	json.NewEncoder(w).Encode(s.lobbyToMap(r.Context(), l))
 }
 
 func (s *Server) GetLobby(w http.ResponseWriter, r *http.Request, lobbyID openapi_types.UUID) {
@@ -116,18 +84,13 @@ func (s *Server) GetLobby(w http.ResponseWriter, r *http.Request, lobbyID openap
 		return
 	}
 
-	l, err := s.DB.GetLobby(r.Context(), uuid.UUID(lobbyID))
-	if err != nil {
+	l, ok := s.Lobbies.Get(uuid.UUID(lobbyID))
+	if !ok {
 		sendError(w, http.StatusNotFound, "Лобби не найдено")
 		return
 	}
 
-	players, err := s.DB.GetLobbyPlayers(r.Context(), l.ID)
-	if err != nil || players == nil {
-		players = []uuid.UUID{}
-	}
-
-	result := s.lobbyToMap(r.Context(), l, players)
+	result := s.lobbyToMap(r.Context(), l)
 	if l.CreatorID == userID {
 		result["invite_code"] = l.InviteCode
 	}
@@ -143,44 +106,17 @@ func (s *Server) JoinLobby(w http.ResponseWriter, r *http.Request, lobbyID opena
 		return
 	}
 
-	l, err := s.DB.GetLobby(r.Context(), uuid.UUID(lobbyID))
-	if err != nil {
+	l, err2 := s.Lobbies.Join(uuid.UUID(lobbyID), userID)
+	if err2 != nil {
 		sendError(w, http.StatusNotFound, "Лобби не найдено")
 		return
 	}
-	if l.Status != "waiting" {
-		sendError(w, http.StatusConflict, "Лобби уже заполнено")
-		return
-	}
 
-	exists, err := s.DB.IsPlayerInLobby(r.Context(), db.IsPlayerInLobbyParams{
-		LobbyID:  l.ID,
-		PlayerID: userID,
-	})
-	if err == nil && exists {
-		// Player is already in this lobby — return current state instead of erroring
-		players, _ := s.DB.GetLobbyPlayers(r.Context(), l.ID)
-		if players == nil {
-			players = []uuid.UUID{}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(s.lobbyToMap(r.Context(), l, players))
-		return
-	}
-
-	if err := s.DB.AddLobbyPlayer(r.Context(), db.AddLobbyPlayerParams{
-		LobbyID:  l.ID,
-		PlayerID: userID,
-	}); err != nil {
-		sendError(w, http.StatusInternalServerError, "Ошибка присоединения к лобби")
-		return
-	}
-
-	players, _ := s.DB.GetLobbyPlayers(r.Context(), l.ID)
-	if len(players) >= int(l.MaxPlayers) {
-		s.DB.DeleteLobby(r.Context(), l.ID)
+	if l.Status == "full" {
+		s.broadcastLobbyList()
 
 		game := s.CreateGameSession(l.CreatorID, userID)
+		s.Lobbies.Delete(l.ID)
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -190,12 +126,10 @@ func (s *Server) JoinLobby(w http.ResponseWriter, r *http.Request, lobbyID opena
 		return
 	}
 
-	if players == nil {
-		players = []uuid.UUID{}
-	}
+	s.broadcastLobbyList()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.lobbyToMap(r.Context(), l, players))
+	json.NewEncoder(w).Encode(s.lobbyToMap(r.Context(), l))
 }
 
 func (s *Server) LeaveLobby(w http.ResponseWriter, r *http.Request, lobbyID openapi_types.UUID) {
@@ -205,36 +139,28 @@ func (s *Server) LeaveLobby(w http.ResponseWriter, r *http.Request, lobbyID open
 		return
 	}
 
-	l, err := s.DB.GetLobby(r.Context(), uuid.UUID(lobbyID))
-	if err != nil {
-		sendError(w, http.StatusNotFound, "Лобби не найдено")
-		return
-	}
-
-	if err := s.DB.RemoveLobbyPlayer(r.Context(), db.RemoveLobbyPlayerParams{
-		LobbyID:  uuid.UUID(lobbyID),
-		PlayerID: userID,
-	}); err != nil {
+	_, deleted, err2 := s.Lobbies.Leave(uuid.UUID(lobbyID), userID)
+	if err2 != nil {
 		sendError(w, http.StatusBadRequest, "Вы не в этом лобби")
 		return
 	}
 
-	// if the creator leaves, delete the lobby entirely
-	remaining, _ := s.DB.GetLobbyPlayers(r.Context(), uuid.UUID(lobbyID))
-	if l.CreatorID == userID || len(remaining) == 0 {
-		s.DB.DeleteLobby(r.Context(), uuid.UUID(lobbyID))
+	s.broadcastLobbyList()
+
+	if deleted {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "lobby deleted"})
 		return
 	}
 
-	s.DB.UpdateLobbyStatus(r.Context(), db.UpdateLobbyStatusParams{
-		ID:     uuid.UUID(lobbyID),
-		Status: "waiting",
-	})
-
+	l, ok := s.Lobbies.Get(uuid.UUID(lobbyID))
+	if !ok {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "lobby deleted"})
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.lobbyToMap(r.Context(), l, remaining))
+	json.NewEncoder(w).Encode(s.lobbyToMap(r.Context(), l))
 }
 
 func (s *Server) DeleteLobby(w http.ResponseWriter, r *http.Request, lobbyID openapi_types.UUID) {
@@ -244,8 +170,8 @@ func (s *Server) DeleteLobby(w http.ResponseWriter, r *http.Request, lobbyID ope
 		return
 	}
 
-	l, err := s.DB.GetLobby(r.Context(), uuid.UUID(lobbyID))
-	if err != nil {
+	l, ok := s.Lobbies.Get(uuid.UUID(lobbyID))
+	if !ok {
 		sendError(w, http.StatusNotFound, "Лобби не найдено")
 		return
 	}
@@ -254,7 +180,8 @@ func (s *Server) DeleteLobby(w http.ResponseWriter, r *http.Request, lobbyID ope
 		return
 	}
 
-	s.DB.DeleteLobby(r.Context(), l.ID)
+	s.Lobbies.Delete(l.ID)
+	s.broadcastLobbyList()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "lobby deleted"})
@@ -275,8 +202,8 @@ func (s *Server) JoinLobbyByCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	l, err := s.DB.FindLobbyByCode(r.Context(), req.Code)
-	if err != nil {
+	l, ok := s.Lobbies.FindByCode(req.Code)
+	if !ok {
 		sendError(w, http.StatusNotFound, "Лобби с таким кодом не найдено")
 		return
 	}
@@ -285,26 +212,35 @@ func (s *Server) JoinLobbyByCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.DB.AddLobbyPlayer(r.Context(), db.AddLobbyPlayerParams{
-		LobbyID:  l.ID,
-		PlayerID: userID,
-	}); err != nil {
+	l, err2 := s.Lobbies.Join(l.ID, userID)
+	if err2 != nil {
 		sendError(w, http.StatusConflict, "Вы уже в лобби")
 		return
 	}
 
-	players, _ := s.DB.GetLobbyPlayers(r.Context(), l.ID)
-	if len(players) >= int(l.MaxPlayers) {
-		s.DB.UpdateLobbyStatus(r.Context(), db.UpdateLobbyStatusParams{
-			ID:     l.ID,
-			Status: "full",
-		})
-		l.Status = "full"
-	}
-	if players == nil {
-		players = []uuid.UUID{}
-	}
+	s.broadcastLobbyList()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.lobbyToMap(r.Context(), l, players))
+	json.NewEncoder(w).Encode(s.lobbyToMap(r.Context(), l))
+}
+
+func (s *Server) broadcastLobbyList() {
+	rows := s.Lobbies.List("")
+	var result []map[string]interface{}
+	for _, l := range rows {
+		result = append(result, s.lobbyToMap(context.Background(), l))
+	}
+	if result == nil {
+		result = []map[string]interface{}{}
+	}
+
+	msg := WSMessage{
+		Type: "lobby_list",
+		Data: mustJSON(result),
+	}
+	s.Hub.mu.RLock()
+	for _, client := range s.Hub.clients {
+		client.SendJSON(msg)
+	}
+	s.Hub.mu.RUnlock()
 }

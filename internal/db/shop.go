@@ -110,3 +110,61 @@ func (q *Queries) AddTimeInBattle(ctx context.Context, userID uuid.UUID, seconds
 	_, err := q.db.ExecContext(ctx, addTimeInBattle, userID, seconds)
 	return err
 }
+
+type InventoryFish struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Price       int    `json:"price"`
+	Active      bool   `json:"active"`
+}
+
+func (q *Queries) GetInventory(ctx context.Context, userID uuid.UUID) ([]InventoryFish, error) {
+	var inventory, activeFish []string
+	err := q.db.QueryRowContext(ctx,
+		`SELECT inventory, active_fish FROM profiles WHERE user_id = $1`, userID).
+		Scan(pq.Array(&inventory), pq.Array(&activeFish))
+	if err != nil {
+		return nil, err
+	}
+
+	if len(inventory) == 0 {
+		return []InventoryFish{}, nil
+	}
+
+	activeSet := make(map[string]bool, len(activeFish))
+	for _, id := range activeFish {
+		activeSet[id] = true
+	}
+
+	rows, err := q.db.QueryContext(ctx,
+		`SELECT id, name, description, price FROM fish_shop WHERE id = ANY($1)`,
+		pq.Array(inventory))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []InventoryFish
+	for rows.Next() {
+		var f InventoryFish
+		if err := rows.Scan(&f.ID, &f.Name, &f.Description, &f.Price); err != nil {
+			return nil, err
+		}
+		f.Active = activeSet[f.ID]
+		result = append(result, f)
+	}
+	return result, rows.Err()
+}
+
+const toggleActiveFishAdd = `UPDATE profiles SET active_fish = array_append(active_fish, $2) WHERE user_id = $1 AND NOT ($2 = ANY(active_fish))`
+const toggleActiveFishRemove = `UPDATE profiles SET active_fish = array_remove(active_fish, $2) WHERE user_id = $1`
+
+func (q *Queries) ToggleActiveFish(ctx context.Context, userID uuid.UUID, fishID string, active bool) error {
+	if active {
+		_, err := q.db.ExecContext(ctx, toggleActiveFishAdd, userID, fishID)
+		return err
+	}
+	_, err := q.db.ExecContext(ctx, toggleActiveFishRemove, userID, fishID)
+	return err
+}

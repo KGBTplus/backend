@@ -1,25 +1,45 @@
 package api
 
+import (
+	"context"
+	"database/sql"
+)
+
 type FishItem struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Price int    `json:"price"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Price       int    `json:"price"`
 }
 
-var FishCatalog = []FishItem{
-	{ID: "clownfish",  Name: "Рыба-клоун",    Price: 100},
-	{ID: "goldfish",   Name: "Золотая рыбка", Price: 250},
-	{ID: "angelfish",  Name: "Рыба-ангел",    Price: 500},
-	{ID: "neon_tetra", Name: "Неоновая тетра", Price: 150},
-	{ID: "betta",      Name: "Петушок",       Price: 750},
-	{ID: "shark",      Name: "Акула",         Price: 1000},
-}
-
-func FishByID(id string) *FishItem {
-	for _, f := range FishCatalog {
-		if f.ID == id {
-			return &f
-		}
+func LoadFishCatalog(ctx context.Context, db *sql.DB) ([]FishItem, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, name, description, price FROM fish_shop ORDER BY price ASC`)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	defer rows.Close()
+
+	var catalog []FishItem
+	for rows.Next() {
+		var f FishItem
+		if err := rows.Scan(&f.ID, &f.Name, &f.Description, &f.Price); err != nil {
+			return nil, err
+		}
+		catalog = append(catalog, f)
+	}
+	return catalog, rows.Err()
+}
+
+func GetFishByID(ctx context.Context, db *sql.DB, id string) (*FishItem, error) {
+	row := db.QueryRowContext(ctx,
+		`SELECT id, name, description, price FROM fish_shop WHERE id = $1`, id)
+	var f FishItem
+	if err := row.Scan(&f.ID, &f.Name, &f.Description, &f.Price); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &f, nil
 }

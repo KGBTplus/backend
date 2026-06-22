@@ -162,6 +162,23 @@ func (gs *GameStore) GetLocked(id uuid.UUID) (*GameRoom, bool) {
 	return g, ok
 }
 
+func (gs *GameStore) Delete(id uuid.UUID) {
+	gs.mu.Lock()
+	delete(gs.games, id)
+	gs.mu.Unlock()
+}
+
+func (gs *GameStore) CleanupStale() {
+	gs.mu.Lock()
+	defer gs.mu.Unlock()
+	now := time.Now()
+	for id, g := range gs.games {
+		if (g.Status == "waiting" || g.Status == "placing_ships") && now.Sub(g.CreatedAt) > 10*time.Minute {
+			delete(gs.games, id)
+		}
+	}
+}
+
 func (gs *GameStore) Get(id uuid.UUID) (*GameRoom, bool) {
 	gs.mu.RLock()
 	g, ok := gs.games[id]

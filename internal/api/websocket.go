@@ -406,6 +406,29 @@ func (c *Client) readPump() {
 		room.AddClient(c)
 
 		gameIDStr := activeGame.ID.String()
+
+		if activeGame.Status == "waiting_reconnect" {
+			log.Printf("[WS readPump] user=%s reconnecting to game %s from waiting_reconnect", c.UserID, activeGame.ID)
+
+			c.Server.Games.Lock()
+			if game, ok := c.Server.Games.GetLocked(activeGame.ID); ok {
+				game.Status = "placing_ships"
+			}
+			c.Server.Games.Unlock()
+
+			c.Server.Timers.StopReconnect(activeGame.ID)
+			c.Server.startPlacementTimer(activeGame.ID)
+
+			if otherClient := room.GetOtherClient(c.UserID); otherClient != nil {
+				otherClient.SendJSON(WSMessage{
+					Type: "opponent_reconnected",
+					Data: mustJSON(map[string]string{
+						"message": "Соперник переподключился",
+					}),
+				})
+			}
+		}
+
 		c.SendJSON(WSMessage{
 			Type: "match_found",
 			Data: mustJSON(MatchFoundData{GameID: gameIDStr}),
@@ -459,6 +482,65 @@ func (c *Client) readPump() {
 		switch msg.Type {
 		case "ping":
 			c.SendJSON(WSMessage{Type: "pong"})
+		case "lobby:list":
+			rows := c.Server.Lobbies.List("")
+			var result []map[string]interface{}
+			for _, l := range rows {
+				result = append(result, c.Server.lobbyToMap(context.Background(), l))
+			}
+			if result == nil {
+				result = []map[string]interface{}{}
+			}
+			c.SendJSON(WSMessage{Type: "lobby_list", Data: mustJSON(result)})
+		case "lobby:create":
+			if c.Room != nil {
+				c.SendJSON(WSMessage{Type: "lobby_error", Data: mustJSON(ErrorData{Message: "Вы уже в лобби или игре"})})
+				break
+			}
+			_, ok := c.Server.Lobbies.IsPlayerInLobby(c.UserID)
+			if ok {
+				c.SendJSON(WSMessage{Type: "lobby_error", Data: mustJSON(ErrorData{Message: "Вы уже в лобби"})})
+				break
+			}
+			l := c.Server.Lobbies.Create(c.UserID)
+			c.SendJSON(WSMessage{Type: "lobby_created", Data: mustJSON(c.Server.lobbyToMap(context.Background(), l))})
+			c.Server.broadcastLobbyList()
+		case "lobby:join":
+			var joinReq struct {
+				LobbyID string `json:"lobby_id"`
+			}
+			json.Unmarshal(msg.Data, &joinReq)
+			lobbyUUID, err := uuid.Parse(joinReq.LobbyID)
+			if err != nil {
+				c.SendJSON(WSMessage{Type: "lobby_error", Data: mustJSON(ErrorData{Message: "Неверный ID лобби"})})
+				break
+			}
+			l, err2 := c.Server.Lobbies.Join(lobbyUUID, c.UserID)
+			if err2 != nil {
+				c.SendJSON(WSMessage{Type: "lobby_error", Data: mustJSON(ErrorData{Message: err2.Error()})})
+				break
+			}
+			if l.Status == "full" {
+				c.Server.broadcastLobbyList()
+				game := c.Server.CreateGameSession(l.CreatorID, c.UserID)
+				c.Server.Lobbies.Delete(l.ID)
+				c.SendJSON(WSMessage{Type: "game_starting", Data: mustJSON(map[string]string{"game_id": game.ID.String()})})
+				if otherClient, ok := c.Server.Hub.GetClient(l.CreatorID); ok {
+					otherClient.SendJSON(WSMessage{Type: "game_starting", Data: mustJSON(map[string]string{"game_id": game.ID.String()})})
+				}
+			} else {
+				c.SendJSON(WSMessage{Type: "lobby_joined", Data: mustJSON(c.Server.lobbyToMap(context.Background(), l))})
+				c.Server.broadcastLobbyList()
+			}
+		case "lobby:leave":
+			existingLobby, ok := c.Server.Lobbies.IsPlayerInLobby(c.UserID)
+			if !ok {
+				c.SendJSON(WSMessage{Type: "lobby_error", Data: mustJSON(ErrorData{Message: "Вы не в лобби"})})
+				break
+			}
+			c.Server.Lobbies.Leave(existingLobby.ID, c.UserID)
+			c.SendJSON(WSMessage{Type: "lobby_left"})
+			c.Server.broadcastLobbyList()
 		case "leave_lobby":
 			c.Server.handleLeaveLobby(c)
 		case "cancel_matchmaking":
